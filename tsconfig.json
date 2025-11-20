@@ -19,7 +19,8 @@
     "dist", 
     "openpro-api-react/node_modules",
     "openpro-api-react/src/playground/**/*",
-    "openpro-api-react/**/__tests__/**/*"
+    "openpro-api-react/**/__tests__/**/*",
+    "src/dashboard/**/*"
   ]
 }
 
