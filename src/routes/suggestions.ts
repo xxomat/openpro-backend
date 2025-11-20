@@ -68,7 +68,7 @@ function normalizeStock(stock: unknown): Record<string, number> {
  * @param fastify - Instance Fastify
  */
 export async function suggestionsRoutes(fastify: FastifyInstance) {
-  // GET /api/suggestions/:idFournisseur
+  // GET /ai/suggestions/:idFournisseur
   fastify.get<{
     Params: { idFournisseur: string };
     Querystring: { status?: 'pending' | 'applied' | 'rejected' }
@@ -95,7 +95,7 @@ export async function suggestionsRoutes(fastify: FastifyInstance) {
     }
   });
   
-  // PATCH /api/suggestions/:id
+  // PATCH /ai/suggestions/:id
   fastify.patch<{
     Params: { id: string };
     Body: { status: 'applied' | 'rejected' }
@@ -127,7 +127,7 @@ export async function suggestionsRoutes(fastify: FastifyInstance) {
     }
   });
   
-  // POST /api/suggestions/:idFournisseur/generate
+  // POST /ai/suggestions/:idFournisseur/generate
   fastify.post<{
     Params: { idFournisseur: string };
     Body: { idHebergement: number }

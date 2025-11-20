@@ -79,7 +79,7 @@ OpenPro.Backend/
 │   │   ├── index.ts            # Agrégation des routes
 │   │   ├── suppliers.ts        # Routes /api/suppliers/*
 │   │   ├── webhooks.ts         # Routes /api/webhooks/*
-│   │   └── suggestions.ts      # Routes /api/suggestions/*
+│   │   └── suggestions.ts      # Routes /ai/suggestions/*
 │   └── utils/
 │       └── dateUtils.ts
 ├── openpro-api-react/           # Sous-module Git (dépôt externe)
@@ -130,11 +130,11 @@ Vue d'ensemble :
   - Déclenche l'analyse IA de façon asynchrone
   - Retourne rapidement au webhook
 
-### 3.3 Routes suggestions (`/api/suggestions`)
+### 3.3 Routes suggestions (`/ai/suggestions`)
 
-- `GET /api/suggestions/:idFournisseur` - Liste des suggestions (filtre optionnel `?status=pending`)
-- `PATCH /api/suggestions/:id` - Mettre à jour le statut d'une suggestion (applied/rejected)
-- `POST /api/suggestions/:idFournisseur/generate` - Déclencher manuellement une analyse
+- `GET /ai/suggestions/:idFournisseur` - Liste des suggestions (filtre optionnel `?status=pending`)
+- `PATCH /ai/suggestions/:id` - Mettre à jour le statut d'une suggestion (applied/rejected)
+- `POST /ai/suggestions/:idFournisseur/generate` - Déclencher manuellement une analyse
 
 ### 3.4 Health check
 
@@ -153,7 +153,7 @@ Le service de suggestions utilise le Vercel AI SDK pour analyser les réservatio
 - Analyse asynchrone pour ne pas bloquer le webhook
 
 **Déclenchement manuel :**
-- Via l'endpoint `POST /api/suggestions/:idFournisseur/generate`
+- Via l'endpoint `POST /ai/suggestions/:idFournisseur/generate`
 
 ### 4.2 Types de suggestions
 

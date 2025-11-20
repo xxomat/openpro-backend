@@ -171,9 +171,9 @@ OpenPro.Backend/
 
 ### Suggestions IA
 
-- `GET /api/suggestions/:idFournisseur` - Liste des suggestions
-- `PATCH /api/suggestions/:id` - Mettre à jour le statut d'une suggestion
-- `POST /api/suggestions/:idFournisseur/generate` - Générer des suggestions
+- `GET /ai/suggestions/:idFournisseur` - Liste des suggestions
+- `PATCH /ai/suggestions/:id` - Mettre à jour le statut d'une suggestion
+- `POST /ai/suggestions/:idFournisseur/generate` - Générer des suggestions
 
 ### Health check
 
@@ -203,7 +203,7 @@ Le backend inclut un service de suggestions utilisant le Vercel AI SDK pour anal
 - Lors de la réception d'un webhook de nouvelle réservation
 
 **Déclenchement manuel :**
-- Via `POST /api/suggestions/:idFournisseur/generate`
+- Via `POST /ai/suggestions/:idFournisseur/generate`
 
 ## Production
 
