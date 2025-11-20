@@ -45,6 +45,9 @@ Note: TBD = To Be Defined
 - Cloudflare AI Gateway: Support optionnel pour le routage et le monitoring des appels IA
 - Validation: Zod pour la validation des schémas IA
 - CORS: Support CORS pour le frontend
+- Dashboard: React 18 + Vite + TypeScript pour l'interface de monitoring
+- Static Files: `@fastify/static` pour servir le dashboard
+- Monitoring: AsyncLocalStorage pour la corrélation des traces
 
 ### 2.2 Structure du projet
 
@@ -60,28 +63,47 @@ OpenPro.Backend/
 │   ├── types/
 │   │   ├── api.ts              # Types partagés
 │   │   ├── apiTypes.ts         # Types pour les réponses API OpenPro
-│   │   └── suggestions.ts      # Types pour suggestions IA
+│   │   ├── suggestions.ts      # Types pour suggestions IA
+│   │   └── traffic.ts          # Types pour le monitoring du trafic
 │   ├── services/
-│   │   ├── openProClient.ts    # Instance du client OpenPro
+│   │   ├── openProClient.ts    # Instance du client OpenPro (avec tracing)
+│   │   ├── trafficMonitor.ts   # Service de monitoring du trafic
+│   │   ├── correlationContext.ts # Contexte de corrélation (AsyncLocalStorage)
 │   │   ├── openpro/            # Services métier OpenPro
 │   │   │   ├── accommodationService.ts
 │   │   │   ├── rateService.ts
 │   │   │   ├── rateTypeService.ts
 │   │   │   ├── stockService.ts
 │   │   │   ├── supplierDataService.ts
+│   │   │   ├── bulkUpdateService.ts  # Service de transformation bulk
 │   │   │   └── utils/
 │   │   │       └── rateUtils.ts
 │   │   └── ai/                 # Services IA
-│   │       ├── suggestionEngine.ts
+│   │       ├── suggestionEngine.ts (avec tracing)
 │   │       ├── analysisPrompts.ts
 │   │       └── suggestionStorage.ts
 │   ├── routes/
 │   │   ├── index.ts            # Agrégation des routes
 │   │   ├── suppliers.ts        # Routes /api/suppliers/*
 │   │   ├── webhooks.ts         # Routes /api/webhooks/*
-│   │   └── suggestions.ts      # Routes /ai/suggestions/*
+│   │   ├── suggestions.ts      # Routes /ai/suggestions/*
+│   │   ├── traffic.ts          # Routes /api/traffic/* (monitoring)
+│   │   └── dashboard.ts        # Route / (interface de monitoring)
+│   ├── dashboard/              # Interface React de monitoring
+│   │   ├── index.html          # Point d'entrée HTML
+│   │   ├── main.tsx            # Initialisation React
+│   │   ├── App.tsx             # Composant principal
+│   │   ├── types.ts            # Types pour l'interface
+│   │   ├── api.ts              # Client API pour le dashboard
+│   │   └── components/         # Composants React
+│   │       ├── StatsBar.tsx
+│   │       ├── FilterBar.tsx
+│   │       ├── EventCard.tsx
+│   │       ├── EventList.tsx
+│   │       └── TraceView.tsx
 │   └── utils/
 │       └── dateUtils.ts
+├── vite.config.dashboard.ts    # Configuration Vite pour le dashboard
 ├── openpro-api-react/           # Sous-module Git (dépôt externe)
 ├── docs/
 │   └── PRD.md                   # Ce document
@@ -122,6 +144,37 @@ Vue d'ensemble :
 #### 3.1.5 Données complètes
 - `GET /api/suppliers/:idFournisseur/supplier-data` - Toutes les données (stock, tarifs, types) (query params `debut`, `fin`)
 
+#### 3.1.6 Mise à jour en bulk
+- `POST /api/suppliers/:idFournisseur/bulk-update` - Sauvegarder les modifications de tarifs et durées minimales en bulk
+  - **Body** :
+    ```typescript
+    {
+      accommodations: [
+        {
+          idHebergement: number,
+          dates: [
+            {
+              date: string,              // YYYY-MM-DD
+              rateTypeId?: number,       // présent si tarif modifié
+              price?: number,            // présent si tarif modifié
+              dureeMin?: number | null   // présent si dureeMin modifiée
+            }
+          ]
+        }
+      ]
+    }
+    ```
+  - **Comportement** :
+    - Reçoit les modifications groupées par hébergement et par date.
+    - Pour chaque hébergement, transforme les modifications en périodes tarifaires au format OpenPro.
+    - Appelle l'API OpenPro `setRates` pour chaque hébergement modifié.
+    - La transformation regroupe les dates contiguës avec les mêmes valeurs en périodes (`debut`/`fin`).
+    - Les périodes sont construites au format `TarifModif[]` avec tous les champs requis (incluant `dureeMin`).
+  - **Réponse** :
+    - `200 OK` en cas de succès.
+    - `400 Bad Request` si les données sont invalides.
+    - `500 Internal Server Error` en cas d'erreur lors de l'appel à l'API OpenPro.
+
 ### 3.2 Routes webhooks (`/api/webhooks`)
 
 - `POST /api/webhooks/openpro/booking` - Réception des webhooks OpenPro pour nouvelles réservations
@@ -139,6 +192,18 @@ Vue d'ensemble :
 ### 3.4 Health check
 
 - `GET /health` - Vérification de l'état du serveur
+
+### 3.5 Routes monitoring (`/api/traffic`)
+
+- `GET /api/traffic/events` - Liste des événements de trafic récents
+  - Query params : `limit`, `type`, `traceId`, `minDuration`, `hasError`
+- `GET /api/traffic/stats` - Statistiques agrégées du trafic
+- `GET /api/traffic/trace/:traceId` - Tous les événements d'une trace corrélée
+
+### 3.6 Dashboard
+
+- `GET /` - Interface de monitoring du trafic (redirige vers `/dashboard/index.html`)
+- `GET /dashboard/*` - Fichiers statiques du dashboard React
 
 ---
 
@@ -284,6 +349,117 @@ S'assurer que toutes les variables d'environnement requises sont configurées da
 
 ---
 
+## 6. Traffic Monitoring Dashboard
+
+### 6.1 Vue d'ensemble
+
+Le backend intègre un système complet de monitoring du trafic HTTP qui capture automatiquement toutes les requêtes entrantes et sortantes (API OpenPro et appels IA). Une interface web React accessible sur `http://localhost:3001/` permet de visualiser en temps réel le trafic et d'analyser les performances.
+
+### 6.2 Architecture du monitoring
+
+**Composants principaux :**
+
+1. **Traffic Monitor Service** (`trafficMonitor.ts`)
+   - Ring buffer en mémoire (1000 événements max)
+   - Stockage des événements de trafic avec métadonnées
+   - Calcul des statistiques agrégées
+
+2. **Correlation Context** (`correlationContext.ts`)
+   - Utilise Node.js `AsyncLocalStorage`
+   - Génère et propage un `traceId` unique par requête
+   - Permet de corréler les appels parents/enfants
+
+3. **Hooks Fastify** (dans `index.ts`)
+   - Hook `onRequest` : génère le traceId et timestamp de début
+   - Hook `onResponse` : calcule la durée et enregistre l'événement
+   - Capture automatique de toutes les requêtes entrantes
+
+4. **Wrappers pour appels sortants**
+   - Client OpenPro wrappé avec Proxy JavaScript
+   - Appels IA tracés dans `suggestionEngine.ts`
+   - Capture automatique des durées, statuts, et erreurs
+
+### 6.3 Types d'événements capturés
+
+- **`incoming`** : Requêtes HTTP entrantes vers le backend
+  - Métadonnées : User-Agent, Origin, durée, status code
+  
+- **`outgoing-openpro`** : Appels sortants vers l'API OpenPro
+  - Métadonnées : idFournisseur, idHebergement, endpoint, durée, status code
+  
+- **`outgoing-ai`** : Appels vers les API IA (OpenAI/Anthropic)
+  - Métadonnées : provider, model, tokens utilisés, durée, status code
+
+### 6.4 Système de corrélation
+
+Chaque requête entrante génère un `traceId` unique propagé automatiquement à tous les appels enfants (OpenPro, IA) grâce à `AsyncLocalStorage`. Cela permet de :
+
+- Visualiser la cascade complète d'une requête
+- Identifier les goulots d'étranglement
+- Tracer les erreurs à leur origine
+- Calculer les durées totales par trace
+
+**Exemple de trace :**
+```
+📥 POST /ai/suggestions/123/generate (traceId: abc-123)
+  ↳ 📤 GET /fournisseur/123/hebergements/456/tarif (450ms)
+  ↳ 📤 GET /fournisseur/123/hebergements/456/stock (380ms)
+  ↳ 🤖 AI OpenAI/gpt-4 (320ms, 1250 tokens)
+Total: 1.2s
+```
+
+### 6.5 Interface utilisateur
+
+**Technologie :** React 18 + Vite + TypeScript
+
+**Fonctionnalités :**
+
+1. **Barre de statistiques**
+   - Total d'événements
+   - Compteurs par type (incoming, OpenPro, AI)
+   - Taux d'erreur
+   - Durée moyenne
+   - Requêtes lentes (>1s)
+
+2. **Filtres**
+   - Par type d'événement
+   - Erreurs seulement
+   - Par traceId (via clic sur événement)
+
+3. **Liste des événements**
+   - Affichage en temps réel (polling 2s)
+   - Color coding : succès (vert), erreur (rouge), lent (orange)
+   - Détails expandables : métadonnées, erreurs, User-Agent, etc.
+
+4. **Vue de trace (modal)**
+   - Arbre hiérarchique des événements corrélés
+   - Durée totale de la trace
+   - Durées individuelles par sous-requête
+   - Visualisation des cascades d'appels
+
+5. **Auto-refresh**
+   - Mise à jour automatique toutes les 2 secondes (activable/désactivable)
+   - Bouton de rafraîchissement manuel
+
+### 6.6 Développement et build
+
+**Développement :**
+- Dashboard : `npm run dev:dashboard` (port 5174 avec proxy vers backend)
+- Backend : `npm run dev` (port 3001)
+
+**Production :**
+- Build : `npm run build` (compile backend + dashboard)
+- Le dashboard est servi depuis `dist/dashboard/` par Fastify Static
+
+### 6.7 Limitations actuelles
+
+- Stockage en mémoire uniquement (pas de persistance)
+- Maximum 1000 événements dans le ring buffer
+- Pas d'authentification pour accéder au dashboard
+- Pas d'export des logs (JSON/CSV)
+
+---
+
 ## 9. Évolutions futures
 
 ### 9.1 Base de données (TBD, voire à ne pas faire)
@@ -303,9 +479,17 @@ S'assurer que toutes les variables d'environnement requises sont configurées da
 
 ### 9.4 Monitoring
 
+✅ **Implémenté** : Dashboard de monitoring du trafic HTTP avec interface React en temps réel
+
+**Améliorations futures :**
+- Persistance des événements en base de données
+- Export des logs (JSON, CSV)
+- Authentification pour l'accès au dashboard
+- WebSocket pour streaming en temps réel (au lieu de polling)
+- Alertes configurables (emails, Slack, etc.)
+- Intégration avec Prometheus/Grafana
 - Logging structuré avec Winston ou Pino
-- Métriques avec Prometheus
-- Alertes sur les erreurs critiques
+- Métriques avancées et graphiques de tendances
 
 ---
 
