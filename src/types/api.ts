@@ -19,6 +19,7 @@ export interface RateType {
 
 export interface BookingDisplay {
   idDossier: number;
+  idHebergement: number;
   dateArrivee: string; // YYYY-MM-DD
   dateDepart: string;   // YYYY-MM-DD
   reference?: string;
