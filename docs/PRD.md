@@ -75,6 +75,7 @@ OpenPro.Backend/
 │   │   │   ├── rateTypeService.ts
 │   │   │   ├── stockService.ts
 │   │   │   ├── supplierDataService.ts
+│   │   │   ├── bulkUpdateService.ts  # Service de transformation bulk
 │   │   │   └── utils/
 │   │   │       └── rateUtils.ts
 │   │   └── ai/                 # Services IA
@@ -142,6 +143,37 @@ Vue d'ensemble :
 
 #### 3.1.5 Données complètes
 - `GET /api/suppliers/:idFournisseur/supplier-data` - Toutes les données (stock, tarifs, types) (query params `debut`, `fin`)
+
+#### 3.1.6 Mise à jour en bulk
+- `POST /api/suppliers/:idFournisseur/bulk-update` - Sauvegarder les modifications de tarifs et durées minimales en bulk
+  - **Body** :
+    ```typescript
+    {
+      accommodations: [
+        {
+          idHebergement: number,
+          dates: [
+            {
+              date: string,              // YYYY-MM-DD
+              rateTypeId?: number,       // présent si tarif modifié
+              price?: number,            // présent si tarif modifié
+              dureeMin?: number | null   // présent si dureeMin modifiée
+            }
+          ]
+        }
+      ]
+    }
+    ```
+  - **Comportement** :
+    - Reçoit les modifications groupées par hébergement et par date.
+    - Pour chaque hébergement, transforme les modifications en périodes tarifaires au format OpenPro.
+    - Appelle l'API OpenPro `setRates` pour chaque hébergement modifié.
+    - La transformation regroupe les dates contiguës avec les mêmes valeurs en périodes (`debut`/`fin`).
+    - Les périodes sont construites au format `TarifModif[]` avec tous les champs requis (incluant `dureeMin`).
+  - **Réponse** :
+    - `200 OK` en cas de succès.
+    - `400 Bad Request` si les données sont invalides.
+    - `500 Internal Server Error` en cas d'erreur lors de l'appel à l'API OpenPro.
 
 ### 3.2 Routes webhooks (`/api/webhooks`)
 

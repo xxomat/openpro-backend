@@ -37,14 +37,44 @@ function createTrackedClient<T extends object>(client: T, baseUrl: string): T {
         const idFournisseur = args[0];
         const idHebergement = args[1];
         
+        // Construire le path réel de l'endpoint selon la méthode
+        let endpointPath = methodName;
+        if (methodName === 'setRates' && typeof idFournisseur === 'number' && typeof idHebergement === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/hebergements/${idHebergement}/typetarifs/tarif`;
+        } else if (methodName === 'getRates' && typeof idFournisseur === 'number' && typeof idHebergement === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/hebergements/${idHebergement}/typetarifs/tarif`;
+        } else if (methodName === 'getStock' && typeof idFournisseur === 'number' && typeof idHebergement === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/hebergements/${idHebergement}/stock`;
+        } else if (methodName === 'updateStock' && typeof idFournisseur === 'number' && typeof idHebergement === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/hebergements/${idHebergement}/stock`;
+        } else if (methodName === 'listAccommodations' && typeof idFournisseur === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/hebergements`;
+        } else if (methodName === 'listRateTypes' && typeof idFournisseur === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/typetarifs`;
+        } else if (methodName === 'listBookings' && typeof idFournisseur === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/dossiers`;
+        } else if (methodName === 'getBooking' && typeof idFournisseur === 'number' && typeof args[1] === 'number') {
+          endpointPath = `/fournisseur/${idFournisseur}/dossiers/${args[1]}`;
+        }
+        
+        // Déterminer la méthode HTTP selon le nom de la méthode
+        let httpMethod = 'GET';
+        if (methodName.includes('set') || methodName.includes('update') || methodName.includes('create') || methodName.includes('add') || methodName.includes('link')) {
+          httpMethod = 'POST';
+        } else if (methodName.includes('delete') || methodName.includes('unlink')) {
+          httpMethod = 'DELETE';
+        } else if (methodName.includes('update') && methodName.includes('RateType')) {
+          httpMethod = 'PUT';
+        }
+        
         try {
           const result = await original.apply(target, args);
           const duration = Date.now() - startTime;
           
           trafficMonitor.logOutgoingOpenPro(
             traceId,
-            'GET/POST', // Nous ne connaissons pas la méthode HTTP exacte depuis ici
-            `${baseUrl}/${methodName}`,
+            httpMethod,
+            `${baseUrl}${endpointPath}`,
             200, // Assume success si pas d'erreur
             duration,
             undefined,
@@ -62,11 +92,17 @@ function createTrackedClient<T extends object>(client: T, baseUrl: string): T {
           const duration = Date.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
           
+          // Essayer d'extraire le status code de l'erreur si c'est une OpenProHttpError
+          let statusCode: number | undefined = undefined;
+          if (error && typeof error === 'object' && 'statusCode' in error) {
+            statusCode = error.statusCode as number;
+          }
+          
           trafficMonitor.logOutgoingOpenPro(
             traceId,
-            'GET/POST',
-            `${baseUrl}/${methodName}`,
-            undefined,
+            httpMethod,
+            `${baseUrl}${endpointPath}`,
+            statusCode,
             duration,
             errorMessage,
             {
