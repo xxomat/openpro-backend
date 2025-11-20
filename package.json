@@ -1,0 +1,27 @@
+{
+  "name": "openpro-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backend API for OpenPro.Admin - Fastify + TypeScript + AI SDK",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:with-stub": "npm run check:stub && tsx watch src/index.ts",
+    "check:stub": "curl -f http://localhost:3000/health > /dev/null 2>&1 || (echo '⚠️  Stub server not running! Start it with: cd ../openpro-api-react && npm run stub' && exit 1)",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.45",
+    "@ai-sdk/openai": "^2.0.69",
+    "@fastify/cors": "^9.0.1",
+    "ai": "^5.0.97",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.26.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
