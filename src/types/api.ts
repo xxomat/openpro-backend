@@ -17,6 +17,15 @@ export interface RateType {
   ordre?: number;
 }
 
+export interface BookingDisplay {
+  idDossier: number;
+  dateArrivee: string; // YYYY-MM-DD
+  dateDepart: string;   // YYYY-MM-DD
+  reference?: string;
+  clientNom?: string;   // Nom du client (nom + prénom)
+  montantTotal?: number; // Prix total de la réservation
+}
+
 export interface SupplierData {
   stock: Record<number, Record<string, number>>;
   rates: Record<number, Record<string, Record<number, number>>>;
@@ -25,6 +34,7 @@ export interface SupplierData {
   dureeMin: Record<number, Record<string, number | null>>;
   rateTypeLabels: Record<number, string>;
   rateTypesList: RateType[];
+  bookings: Record<number, BookingDisplay[]>;
 }
 
 export interface RatesData {
