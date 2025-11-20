@@ -23,12 +23,10 @@ export function getAIModel() {
       throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai');
     }
     
-    return openai('gpt-4-turbo-preview', {
-      apiKey: config.OPENAI_API_KEY,
-      baseURL: config.CLOUDFLARE_AI_GATEWAY_URL 
-        ? `${config.CLOUDFLARE_AI_GATEWAY_URL}/openai`
-        : undefined,
-    });
+    // Note: apiKey et baseURL doivent être configurés via les variables d'environnement
+    // OPENAI_API_KEY pour la clé API
+    // OPENAI_BASE_URL pour Cloudflare AI Gateway
+    return openai('gpt-4-turbo-preview');
   }
   
   if (provider === 'anthropic') {
@@ -36,12 +34,10 @@ export function getAIModel() {
       throw new Error('ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic');
     }
     
-    return anthropic('claude-3-5-sonnet-20241022', {
-      apiKey: config.ANTHROPIC_API_KEY,
-      baseURL: config.CLOUDFLARE_AI_GATEWAY_URL 
-        ? `${config.CLOUDFLARE_AI_GATEWAY_URL}/anthropic`
-        : undefined,
-    });
+    // Note: apiKey et baseURL doivent être configurés via les variables d'environnement
+    // ANTHROPIC_API_KEY pour la clé API
+    // ANTHROPIC_BASE_URL pour Cloudflare AI Gateway
+    return anthropic('claude-3-5-sonnet-20241022');
   }
   
   throw new Error(`Unknown AI provider: ${provider}. Supported: openai, anthropic`);

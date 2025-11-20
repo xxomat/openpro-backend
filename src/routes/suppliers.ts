@@ -35,7 +35,7 @@ export async function suppliersRoutes(fastify: FastifyInstance) {
       const accommodations = await getAccommodations(idFournisseur);
       return accommodations;
     } catch (error) {
-      fastify.log.error('Error fetching accommodations:', error);
+      fastify.log.error({ error }, 'Error fetching accommodations');
       reply.status(500).send({ 
         error: 'Failed to fetch accommodations',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -77,7 +77,7 @@ export async function suppliersRoutes(fastify: FastifyInstance) {
       );
       return ratesData;
     } catch (error) {
-      fastify.log.error('Error fetching rates:', error);
+      fastify.log.error({ error }, 'Error fetching rates');
       reply.status(500).send({ 
         error: 'Failed to fetch rates',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -112,7 +112,7 @@ export async function suppliersRoutes(fastify: FastifyInstance) {
       const stock = await loadStockForAccommodation(idFournisseur, idHebergement, debut, fin);
       return stock;
     } catch (error) {
-      fastify.log.error('Error fetching stock:', error);
+      fastify.log.error({ error }, 'Error fetching stock');
       reply.status(500).send({ 
         error: 'Failed to fetch stock',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -144,7 +144,7 @@ export async function suppliersRoutes(fastify: FastifyInstance) {
         rateTypesList
       };
     } catch (error) {
-      fastify.log.error('Error fetching rate types:', error);
+      fastify.log.error({ error }, 'Error fetching rate types');
       reply.status(500).send({ 
         error: 'Failed to fetch rate types',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -185,7 +185,7 @@ export async function suppliersRoutes(fastify: FastifyInstance) {
       const data = await getSupplierData(idFournisseur, accommodations, startDate, endDate);
       return data;
     } catch (error) {
-      fastify.log.error('Error fetching supplier data:', error);
+      fastify.log.error({ error }, 'Error fetching supplier data');
       reply.status(500).send({ 
         error: 'Failed to fetch supplier data',
         message: error instanceof Error ? error.message : 'Unknown error'

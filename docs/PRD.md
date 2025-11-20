@@ -17,6 +17,8 @@
 
 Le backend utilise l'API Open Pro Multi v1 (documentation disponible sur [documentation.open-system.fr](https://documentation.open-system.fr/api-openpro/tarif/multi/v1/)) via le sous-module client `openpro-api-react` pour communiquer avec l'API OpenPro. Il expose ensuite une API REST simplifiée que le frontend consomme.
 
+**Note importante:** `openpro-api-react` est un dépôt Git externe distinct, ajouté au backend comme sous-module Git. Ce dépôt contient le client TypeScript, les types OpenPro, et le stub-server utilisé pour les tests en développement.
+
 ### 1.3 Portée
 
 Le backend couvre les domaines fonctionnels suivants :
@@ -38,7 +40,7 @@ Note: TBD = To Be Defined
 - Langage: TypeScript
 - Runtime: Node.js (ESM)
 - Gestion de paquets: npm
-- Client API OpenPro: sous-module Git `openpro-api-react` (librairie TypeScript fournissant client et types Open Pro)
+- Client API OpenPro: sous-module Git `openpro-api-react` (dépôt externe, contient client TypeScript, types Open Pro, et stub-server pour tests)
 - AI SDK: Vercel AI SDK (`ai`) avec support OpenAI et Anthropic
 - Cloudflare AI Gateway: Support optionnel pour le routage et le monitoring des appels IA
 - Validation: Zod pour la validation des schémas IA
@@ -80,7 +82,7 @@ OpenPro.Backend/
 │   │   └── suggestions.ts      # Routes /api/suggestions/*
 │   └── utils/
 │       └── dateUtils.ts
-├── openpro-api-react/           # Sous-module Git
+├── openpro-api-react/           # Sous-module Git (dépôt externe)
 ├── docs/
 │   └── PRD.md                   # Ce document
 ├── .env.example
@@ -218,7 +220,9 @@ Les suggestions sont stockées en mémoire (Map) pour l'instant. En production, 
 
 ### 7.1 Utilisation du stub server
 
-En développement, le backend peut pointer vers le stub server (`openpro-api-react/stub-server`) au lieu de l'API OpenPro réelle.
+En développement, le backend peut pointer vers le stub server fourni par le sous-module `openpro-api-react` au lieu de l'API OpenPro réelle.
+
+**Note:** Le stub-server n'est pas dans le dépôt du backend. Il fait partie du sous-module `openpro-api-react`.
 
 Configuration :
 ```ini
@@ -228,9 +232,11 @@ OPENPRO_API_KEY=fake-key-for-testing
 
 ### 7.2 Workflow de développement
 
-1. Terminal 1 : Démarrer le stub server `cd openpro-api-react && npm run stub` (port 3000)
-2. Terminal 2 : Démarrer le backend `npm run dev` (port 3001)
-3. Terminal 3 : Démarrer le frontend `cd ../OpenPro.Admin && npm run dev` (port 4321)
+1. Terminal 1 : Démarrer le stub server depuis la racine du monorepo `cd openpro-api-react && npm run stub` (port 3000)
+2. Terminal 2 : Démarrer le backend `cd OpenPro.Backend && npm run dev` (port 3001)
+3. Terminal 3 : Démarrer le frontend `cd OpenPro.Admin && npm run dev` (port 4321)
+
+**Note:** En développement dans un monorepo, le stub-server peut être lancé depuis `openpro-api-react/` à la racine. Le backend référence ce même dépôt via son sous-module.
 
 ### 7.3 Production
 
@@ -239,6 +245,18 @@ En production, pointer vers l'API réelle :
 OPENPRO_BASE_URL=https://api.open-pro.fr/tarif/multi/v1
 OPENPRO_API_KEY=votre_vraie_cle_api
 ```
+
+### 7.4 Configuration du sous-module openpro-api-react
+
+Le backend référence `openpro-api-react` comme sous-module Git. Pour l'initialiser:
+
+```bash
+git submodule update --init --recursive
+```
+
+Le sous-module pointe vers le dépôt externe `openpro-api-react`. Voir `SETUP.md` pour les détails.
+
+**Important:** Le sous-module inclut le stub-server. En développement, il est recommandé de lancer le stub-server depuis une instance séparée d'`openpro-api-react` (à la racine du monorepo ou checkout séparé) plutôt que depuis le sous-module du backend, pour éviter les conflits de versions.
 
 ---
 

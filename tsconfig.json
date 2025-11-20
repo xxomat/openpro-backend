@@ -4,7 +4,6 @@
     "module": "ES2022",
     "moduleResolution": "node",
     "outDir": "./dist",
-    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,7 +13,13 @@
       "@openpro-api-react/*": ["./openpro-api-react/src/*"]
     }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*", "openpro-api-react/src/client/**/*"],
+  "exclude": [
+    "node_modules", 
+    "dist", 
+    "openpro-api-react/node_modules",
+    "openpro-api-react/src/playground/**/*",
+    "openpro-api-react/**/__tests__/**/*"
+  ]
 }
 

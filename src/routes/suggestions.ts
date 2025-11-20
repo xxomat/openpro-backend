@@ -87,7 +87,7 @@ export async function suggestionsRoutes(fastify: FastifyInstance) {
       const suggestions = await getSuggestionsBySupplier(idFournisseur, status);
       return { suggestions };
     } catch (error) {
-      fastify.log.error('Error fetching suggestions:', error);
+      fastify.log.error({ error }, 'Error fetching suggestions');
       reply.status(500).send({ 
         error: 'Failed to fetch suggestions',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -119,7 +119,7 @@ export async function suggestionsRoutes(fastify: FastifyInstance) {
       
       return { success: true, suggestion: updated };
     } catch (error) {
-      fastify.log.error('Error updating suggestion:', error);
+      fastify.log.error({ error }, 'Error updating suggestion');
       reply.status(500).send({ 
         error: 'Failed to update suggestion',
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -182,7 +182,7 @@ export async function suggestionsRoutes(fastify: FastifyInstance) {
         suggestionsCount: suggestions.length
       };
     } catch (error) {
-      fastify.log.error('Error generating suggestions:', error);
+      fastify.log.error({ error }, 'Error generating suggestions');
       reply.status(500).send({ 
         error: 'Failed to generate suggestions',
         message: error instanceof Error ? error.message : 'Unknown error'

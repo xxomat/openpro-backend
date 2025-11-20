@@ -18,21 +18,43 @@ Backend API Node.js/TypeScript pour l'application OpenPro.Admin. Gère tous les 
 
 ## Installation
 
-### 1. Cloner le dépôt et initialiser le sous-module
+### 1. Cloner le dépôt
 
 ```bash
-git clone https://github.com/xxomat/openpro-backend.git
-cd openpro-backend
+git clone https://github.com/xxomat/openpro-backend.git OpenPro.Backend
+cd OpenPro.Backend
+```
+
+### 2. Configurer le sous-module openpro-api-react
+
+Le backend nécessite le module `openpro-api-react` pour accéder au client API OpenPro et au stub server.
+
+**Sous Windows (PowerShell) :**
+```powershell
+# Depuis le répertoire parent contenant openpro-api-react
+cd OpenPro.Backend
+New-Item -ItemType Junction -Path openpro-api-react -Target ..\openpro-api-react
+```
+
+**Sous Linux/macOS :**
+```bash
+cd OpenPro.Backend
+ln -s ../openpro-api-react openpro-api-react
+```
+
+**Alternative - Sous-module Git :**
+Si `openpro-api-react` n'est pas encore cloné localement :
+```bash
 git submodule update --init --recursive
 ```
 
-### 2. Installer les dépendances
+### 3. Installer les dépendances
 
 ```bash
 npm install
 ```
 
-### 3. Configurer les variables d'environnement
+### 4. Configurer les variables d'environnement
 
 Copier `.env.example` vers `.env` :
 
@@ -62,26 +84,51 @@ OPENAI_API_KEY=sk-...
 
 ### Workflow complet (3 terminaux)
 
-**Terminal 1 : Stub server**
+Le développement nécessite de lancer 3 serveurs dans l'ordre :
+
+**Terminal 1 : Stub server** (depuis le dépôt openpro-api-react)
 ```bash
 cd ../openpro-api-react
+npm install  # Si pas encore fait
 npm run stub
 ```
 Le stub écoute sur http://localhost:3000
 
-**Terminal 2 : Backend**
+**Terminal 2 : Backend** (depuis le dépôt OpenPro.Backend)
 ```bash
-cd OpenPro.Backend
+cd ../OpenPro.Backend
+npm install  # Si pas encore fait
 npm run dev
 ```
 Le backend écoute sur http://localhost:3001
 
-**Terminal 3 : Frontend**
+**Terminal 3 : Frontend** (depuis le dépôt OpenPro.Admin)
 ```bash
 cd ../OpenPro.Admin
+npm install  # Si pas encore fait
 npm run dev
 ```
 Le frontend écoute sur http://localhost:4321
+
+### Structure des dépôts
+
+Le projet utilise 3 dépôts Git séparés :
+
+```
+Repositories/
+├── openpro-api-react/           # Client API + Stub server
+│   ├── stub-server/
+│   │   ├── server.js
+│   │   └── stub-data.json
+│   └── src/client/
+│
+├── OpenPro.Backend/             # Backend Node.js/Fastify
+│   ├── openpro-api-react/  →   # Lien/Junction vers ../openpro-api-react
+│   └── src/
+│
+└── OpenPro.Admin/               # Frontend Astro/React
+    └── src/
+```
 
 ### Scripts disponibles
 
@@ -183,11 +230,18 @@ OPENPRO_API_KEY=votre_vraie_cle_api
 
 ## Tests
 
-Le backend utilise le stub server pour les tests en développement. Assurer que le stub tourne :
+Le backend utilise le stub server (du module `openpro-api-react`) pour les tests en développement. 
+
+### Démarrer le stub server
 
 ```bash
-npm run dev:with-stub
+cd ../openpro-api-react
+npm run stub
 ```
+
+Le stub server écoute sur http://localhost:3000 et simule l'API OpenPro avec des données de test depuis `stub-data.json`.
+
+**Note :** Le stub-server et ses données (`stub-data.json`) sont uniquement dans le dépôt `openpro-api-react`, pas dans le backend.
 
 ## Documentation
 

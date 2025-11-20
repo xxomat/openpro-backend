@@ -136,14 +136,14 @@ export async function webhooksRoutes(fastify: FastifyInstance) {
           fastify.log.info(`${suggestions.length} suggestions générées pour hébergement ${booking.idHebergement}`);
         })
         .catch(err => {
-          fastify.log.error('Erreur génération suggestions:', err);
+          fastify.log.error({ error: err }, 'Erreur génération suggestions');
         });
       
       // Réponse rapide au webhook
       return { received: true, message: 'Analyse en cours' };
       
     } catch (error) {
-      fastify.log.error('Erreur traitement webhook:', error);
+      fastify.log.error({ error }, 'Erreur traitement webhook');
       reply.status(500).send({ 
         error: 'Internal server error',
         message: error instanceof Error ? error.message : 'Unknown error'
