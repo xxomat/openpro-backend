@@ -63,6 +63,9 @@ export async function loadBookingsForAccommodation(
     // Extraire le montant total
     const montantTotal = booking.paiement?.montantTotal;
     
+    // Extraire le nombre de personnes
+    const nbPersonnes = booking.hebergement?.nbPersonnes;
+    
     bookings.push({
       idDossier: booking.idDossier ?? 0,
       idHebergement: booking.hebergement.idHebergement ?? idHebergement,
@@ -70,7 +73,8 @@ export async function loadBookingsForAccommodation(
       dateDepart: booking.hebergement.dateDepart,
       reference: booking.reference,
       clientNom,
-      montantTotal
+      montantTotal,
+      nbPersonnes
     });
   }
   
