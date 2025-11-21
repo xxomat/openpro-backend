@@ -1,8 +1,27 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 dist/
+.wrangler/
+
+# Environment files
 .env
+.dev.vars
+
+# Logs
 *.log
+npm-debug.log*
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript
 *.tsbuildinfo
-package-lock.json
-openpro-api-react/

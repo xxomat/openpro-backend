@@ -1,28 +1,47 @@
 /**
- * Stockage des suggestions IA
+ * Stockage des suggestions IA avec D1
  * 
- * Ce fichier gère le stockage en mémoire des suggestions générées par l'IA.
- * En production, ce stockage devrait être migré vers une base de données.
+ * Ce fichier gère le stockage des suggestions générées par l'IA dans D1 (SQLite).
  */
 
 import type { PricingSuggestion } from '../../types/suggestions.js';
+import type { Env } from '../../index.js';
 
 /**
- * Stockage en mémoire des suggestions (Map<id, PricingSuggestion>)
- * 
- * TODO: Migrer vers une base de données en production
- */
-const suggestionsStore = new Map<string, PricingSuggestion>();
-
-/**
- * Sauvegarde des suggestions dans le stockage
+ * Sauvegarde des suggestions dans D1
  * 
  * @param suggestions - Liste des suggestions à sauvegarder
+ * @param env - Variables d'environnement Workers
  */
-export async function saveSuggestions(suggestions: PricingSuggestion[]): Promise<void> {
-  for (const suggestion of suggestions) {
-    suggestionsStore.set(suggestion.id, suggestion);
+export async function saveSuggestions(suggestions: PricingSuggestion[], env: Env): Promise<void> {
+  if (!suggestions || suggestions.length === 0) {
+    return;
   }
+  
+  // Préparer les requêtes d'insertion
+  const statements = suggestions.map(suggestion => {
+    return env.DB.prepare(`
+      INSERT INTO ai_suggestions (
+        id, id_fournisseur, id_hebergement, suggestion_type,
+        status, suggested_data, rationale, confidence_score,
+        date_created, date_modified
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      suggestion.id,
+      suggestion.idFournisseur,
+      suggestion.idHebergement,
+      'pricing', // Type de suggestion
+      suggestion.status,
+      JSON.stringify(suggestion), // Stocker toute la suggestion en JSON
+      suggestion.rationale || null,
+      suggestion.confidence || null,
+      suggestion.createdAt.toISOString(),
+      suggestion.createdAt.toISOString()
+    );
+  });
+  
+  // Exécuter toutes les insertions en batch
+  await env.DB.batch(statements);
 }
 
 /**
@@ -30,21 +49,41 @@ export async function saveSuggestions(suggestions: PricingSuggestion[]): Promise
  * 
  * @param idFournisseur - Identifiant du fournisseur
  * @param status - Statut optionnel pour filtrer les suggestions
+ * @param env - Variables d'environnement Workers
  * @returns Liste des suggestions correspondant aux critères
  */
 export async function getSuggestionsBySupplier(
   idFournisseur: number,
-  status?: 'pending' | 'applied' | 'rejected'
+  status: 'pending' | 'applied' | 'rejected' | undefined,
+  env: Env
 ): Promise<PricingSuggestion[]> {
-  const all = Array.from(suggestionsStore.values());
-  let filtered = all.filter(s => s.idFournisseur === idFournisseur);
+  let query = `
+    SELECT * FROM ai_suggestions
+    WHERE id_fournisseur = ?
+  `;
+  const params: any[] = [idFournisseur];
   
   if (status) {
-    filtered = filtered.filter(s => s.status === status);
+    query += ' AND status = ?';
+    params.push(status);
   }
   
-  // Trier par date de création (plus récent en premier)
-  return filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  query += ' ORDER BY date_created DESC';
+  
+  const result = await env.DB.prepare(query).bind(...params).all();
+  
+  if (!result.results) {
+    return [];
+  }
+  
+  // Convertir les résultats en PricingSuggestion
+  return result.results.map((row: any) => {
+    const suggestionData = JSON.parse(row.suggested_data);
+    return {
+      ...suggestionData,
+      createdAt: new Date(row.date_created)
+    } as PricingSuggestion;
+  });
 }
 
 /**
@@ -52,21 +91,43 @@ export async function getSuggestionsBySupplier(
  * 
  * @param id - Identifiant de la suggestion
  * @param status - Nouveau statut (applied ou rejected)
+ * @param env - Variables d'environnement Workers
  * @returns La suggestion mise à jour ou null si non trouvée
  */
 export async function updateSuggestionStatus(
   id: string,
-  status: 'applied' | 'rejected'
+  status: 'applied' | 'rejected',
+  env: Env
 ): Promise<PricingSuggestion | null> {
-  const suggestion = suggestionsStore.get(id);
+  // Vérifier que la suggestion existe
+  const existing = await env.DB.prepare(`
+    SELECT suggested_data FROM ai_suggestions WHERE id = ?
+  `).bind(id).first();
   
-  if (!suggestion) {
+  if (!existing) {
     return null;
   }
   
-  suggestion.status = status;
-  suggestionsStore.set(id, suggestion);
+  // Mettre à jour le statut
+  await env.DB.prepare(`
+    UPDATE ai_suggestions 
+    SET status = ?, date_modified = ?
+    WHERE id = ?
+  `).bind(status, new Date().toISOString(), id).run();
   
-  return suggestion;
+  // Récupérer et retourner la suggestion mise à jour
+  const updated = await env.DB.prepare(`
+    SELECT * FROM ai_suggestions WHERE id = ?
+  `).bind(id).first();
+  
+  if (!updated) {
+    return null;
+  }
+  
+  const suggestionData = JSON.parse((updated as any).suggested_data);
+  return {
+    ...suggestionData,
+    status,
+    createdAt: new Date((updated as any).date_created)
+  } as PricingSuggestion;
 }
-

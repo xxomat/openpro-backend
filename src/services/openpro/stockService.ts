@@ -5,7 +5,8 @@
  * pour un hébergement sur une plage de dates donnée.
  */
 
-import { openProClient } from '../openProClient.js';
+import { getOpenProClient } from '../openProClient.js';
+import type { Env } from '../../index.js';
 
 /**
  * Charge le stock disponible pour un hébergement sur une plage de dates
@@ -17,6 +18,7 @@ import { openProClient } from '../openProClient.js';
  * @param idHebergement - Identifiant de l'hébergement
  * @param debut - Date de début au format YYYY-MM-DD
  * @param fin - Date de fin au format YYYY-MM-DD
+ * @param env - Variables d'environnement Workers
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
  * @returns Map du stock par date (clé: date YYYY-MM-DD, valeur: quantité disponible)
  * @throws {Error} Peut lever une erreur si le chargement du stock échoue
@@ -27,8 +29,10 @@ export async function loadStockForAccommodation(
   idHebergement: number,
   debut: string,
   fin: string,
+  env: Env,
   signal?: AbortSignal
 ): Promise<Record<string, number>> {
+  const openProClient = getOpenProClient(env);
   const stock = await openProClient.getStock(idFournisseur, idHebergement, {
     debut,
     fin,
