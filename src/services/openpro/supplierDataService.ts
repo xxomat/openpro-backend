@@ -14,6 +14,7 @@ import { getAccommodations } from './accommodationService.js';
 import { loadStockForAccommodation } from './stockService.js';
 import { loadRateTypes, buildRateTypesList } from './rateTypeService.js';
 import { loadRatesForAccommodation } from './rateService.js';
+import { loadBookingsForAccommodation } from './bookingService.js';
 
 /**
  * Charge toutes les données (stock, tarifs, types de tarifs) pour un fournisseur
@@ -47,6 +48,7 @@ export async function getSupplierData(
   const nextPromo: Record<number, Record<string, boolean>> = {};
   const nextRateTypes: Record<number, Record<string, string[]>> = {};
   const nextDureeMin: Record<number, Record<string, number | null>> = {};
+  const nextBookings: Record<number, import('../../types/api.js').BookingDisplay[]> = {};
   const debut = formatDate(startDate);
   const fin = formatDate(endDate);
   
@@ -79,6 +81,19 @@ export async function getSupplierData(
     } catch {
       // Ignorer les erreurs de tarifs pour l'instant
     }
+
+    // Charger les réservations (toutes les réservations, pas de filtre par dates)
+    try {
+      const bookings = await loadBookingsForAccommodation(
+        idFournisseur,
+        acc.idHebergement,
+        signal
+      );
+      nextBookings[acc.idHebergement] = bookings;
+    } catch {
+      // Ignorer les erreurs de réservations pour l'instant
+      nextBookings[acc.idHebergement] = [];
+    }
   }
   
   // Construire les structures finales de types de tarifs
@@ -91,7 +106,8 @@ export async function getSupplierData(
     rateTypes: nextRateTypes,
     dureeMin: nextDureeMin,
     rateTypeLabels,
-    rateTypesList
+    rateTypesList,
+    bookings: nextBookings
   };
 }
 
