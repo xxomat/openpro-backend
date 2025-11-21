@@ -15,6 +15,7 @@ import { loadStockForAccommodation } from './stockService.js';
 import { loadRateTypes, buildRateTypesList } from './rateTypeService.js';
 import { loadRatesForAccommodation } from './rateService.js';
 import { loadBookingsForAccommodation } from './bookingService.js';
+import type { Env } from '../../index.js';
 
 /**
  * Charge toutes les données (stock, tarifs, types de tarifs) pour un fournisseur
@@ -41,6 +42,7 @@ export async function getSupplierData(
   accommodationsList: Accommodation[],
   startDate: Date,
   endDate: Date,
+  env: Env,
   signal?: AbortSignal
 ): Promise<SupplierData> {
   const nextStock: Record<number, Record<string, number>> = {};
@@ -53,14 +55,14 @@ export async function getSupplierData(
   const fin = formatDate(endDate);
   
   // Charger les types de tarifs disponibles
-  const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodationsList, signal);
+  const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodationsList, env, signal);
   
   // Charger les données pour chaque hébergement
   for (const acc of accommodationsList) {
     if (signal?.aborted) throw new Error('Cancelled');
     
     // Charger le stock
-    const mapStock = await loadStockForAccommodation(idFournisseur, acc.idHebergement, debut, fin, signal);
+    const mapStock = await loadStockForAccommodation(idFournisseur, acc.idHebergement, debut, fin, env, signal);
     nextStock[acc.idHebergement] = mapStock;
 
     // Charger les tarifs, promotions, types et durées minimales
@@ -71,6 +73,7 @@ export async function getSupplierData(
         debut,
         fin,
         discoveredRateTypes,
+        env,
         signal
       );
       
@@ -87,6 +90,7 @@ export async function getSupplierData(
       const bookings = await loadBookingsForAccommodation(
         idFournisseur,
         acc.idHebergement,
+        env,
         signal
       );
       nextBookings[acc.idHebergement] = bookings;

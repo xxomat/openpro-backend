@@ -1,0 +1,28 @@
+name = "openpro-backend"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Variables d'environnement pour le développement local
+[vars]
+OPENPRO_BASE_URL = "https://api.open-pro.fr/tarif/multi/v1"
+FRONTEND_URL = "http://localhost:4321"
+AI_PROVIDER = "openai"
+
+# Secrets (à définir via: wrangler secret put <NAME>)
+# OPENPRO_API_KEY - Clé API OpenPro
+# OPENAI_API_KEY - Clé API OpenAI (optionnel)
+# ANTHROPIC_API_KEY - Clé API Anthropic (optionnel)
+
+# D1 Database (SQLite dans Workers)
+# En mode local (wrangler dev), database_id peut être vide - Wrangler créera automatiquement une base locale
+# En production, utilisez: npm run d1:create puis mettez le database_id ici
+[[d1_databases]]
+binding = "DB"
+database_name = "openpro-db"
+database_id = "00000000-0000-0000-0000-000000000000" # Vide = base locale automatique, ou ID de production après: npm run d1:create
+
+# Configuration pour le développement local
+[dev]
+port = 8787
+local_protocol = "http"
+

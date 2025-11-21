@@ -1,9 +1,10 @@
 # PRD - Product Requirements Document
 ## OpenPro.Backend
 
-**Version:** 1.0.0  
+**Version:** 2.0.0  
 **Date de création:** 2025  
-**Statut:** Draft  
+**Dernière mise à jour:** 2025 (Migration Cloudflare Workers)  
+**Statut:** Actif  
 
 ---
 
@@ -11,7 +12,9 @@
 
 ### 1.1 Objectif du projet
 
-**OpenPro.Backend** est une API REST backend Node.js/Fastify qui sert d'intermédiaire entre le frontend OpenPro.Admin et l'API Open Pro Multi v1. Il gère tous les appels à l'API OpenPro, sécurise la clé API côté serveur, et expose une API REST simplifiée pour le frontend.
+**OpenPro.Backend** est une API REST backend déployée sur Cloudflare Workers qui sert d'intermédiaire entre le frontend OpenPro.Admin et l'API Open Pro Multi v1. Il gère tous les appels à l'API OpenPro, sécurise la clé API côté serveur, et expose une API REST simplifiée pour le frontend.
+
+**Architecture serverless** : Le backend fonctionne sur Cloudflare Workers, une plateforme edge computing qui permet un déploiement global avec une latence minimale et un scaling automatique.
 
 ### 1.2 Contexte
 
@@ -25,10 +28,9 @@ Le backend couvre les domaines fonctionnels suivants :
 - Gestion des fournisseurs et hébergements
 - Gestion des stocks
 - Gestion des tarifs et types de tarifs
-- Service de suggestions IA pour les ajustements de tarifs (TBD)
-- Réception et traitement des webhooks OpenPro (TBD)
-
-Note: TBD = To Be Defined
+- Service de suggestions IA pour les ajustements de tarifs
+- Réception et traitement des webhooks OpenPro
+- Persistance des données via Cloudflare D1 (SQLite serverless)
 
 ---
 
@@ -36,18 +38,18 @@ Note: TBD = To Be Defined
 
 ### 2.1 Stack technologique
 
-- Backend: Fastify (framework web Node.js)
-- Langage: TypeScript
-- Runtime: Node.js (ESM)
-- Gestion de paquets: npm
-- Client API OpenPro: sous-module Git `openpro-api-react` (dépôt externe, contient client TypeScript, types Open Pro, et stub-server pour tests)
-- AI SDK: Vercel AI SDK (`ai`) avec support OpenAI et Anthropic
-- Cloudflare AI Gateway: Support optionnel pour le routage et le monitoring des appels IA
-- Validation: Zod pour la validation des schémas IA
-- CORS: Support CORS pour le frontend
-- Dashboard: React 18 + Vite + TypeScript pour l'interface de monitoring
-- Static Files: `@fastify/static` pour servir le dashboard
-- Monitoring: AsyncLocalStorage pour la corrélation des traces
+- **Runtime**: Cloudflare Workers (V8 isolates, edge computing)
+- **Framework**: itty-router (router léger et performant pour Workers)
+- **Langage**: TypeScript
+- **Base de données**: Cloudflare D1 (SQLite serverless)
+- **Gestion de paquets**: npm
+- **Client API OpenPro**: sous-module Git `openpro-api-react` (dépôt externe, contient client TypeScript, types Open Pro, et stub-server pour tests)
+- **AI SDK**: Vercel AI SDK (`ai`) avec support OpenAI et Anthropic
+- **Cloudflare AI Gateway**: Support optionnel pour le routage et le monitoring des appels IA
+- **Validation**: Zod pour la validation des schémas IA
+- **CORS**: Support CORS pour le frontend (headers manuels)
+- **Monitoring**: Dashboard Cloudflare natif (Workers Analytics, Workers Logs, D1 Metrics)
+- **Configuration**: wrangler.toml + secrets Cloudflare
 
 ### 2.2 Structure du projet
 
@@ -56,19 +58,15 @@ Arborescence principale du dépôt :
 ```
 OpenPro.Backend/
 ├── src/
-│   ├── index.ts                 # Point d'entrée Fastify
+│   ├── index.ts                 # Point d'entrée Cloudflare Worker
 │   ├── config/
-│   │   ├── env.ts              # Variables d'environnement
 │   │   └── ai.ts               # Configuration AI SDK
 │   ├── types/
 │   │   ├── api.ts              # Types partagés
 │   │   ├── apiTypes.ts         # Types pour les réponses API OpenPro
-│   │   ├── suggestions.ts      # Types pour suggestions IA
-│   │   └── traffic.ts          # Types pour le monitoring du trafic
+│   │   └── suggestions.ts      # Types pour suggestions IA
 │   ├── services/
-│   │   ├── openProClient.ts    # Instance du client OpenPro (avec tracing)
-│   │   ├── trafficMonitor.ts   # Service de monitoring du trafic
-│   │   ├── correlationContext.ts # Contexte de corrélation (AsyncLocalStorage)
+│   │   ├── openProClient.ts    # Factory du client OpenPro
 │   │   ├── openpro/            # Services métier OpenPro
 │   │   │   ├── accommodationService.ts
 │   │   │   ├── rateService.ts
@@ -79,49 +77,43 @@ OpenPro.Backend/
 │   │   │   └── utils/
 │   │   │       └── rateUtils.ts
 │   │   └── ai/                 # Services IA
-│   │       ├── suggestionEngine.ts (avec tracing)
+│   │       ├── suggestionEngine.ts
 │   │       ├── analysisPrompts.ts
-│   │       └── suggestionStorage.ts
+│   │       └── suggestionStorage.ts  # Stockage D1
 │   ├── routes/
 │   │   ├── index.ts            # Agrégation des routes
 │   │   ├── suppliers.ts        # Routes /api/suppliers/*
 │   │   ├── webhooks.ts         # Routes /api/webhooks/*
-│   │   ├── suggestions.ts      # Routes /ai/suggestions/*
-│   │   ├── traffic.ts          # Routes /api/traffic/* (monitoring)
-│   │   └── dashboard.ts        # Route / (interface de monitoring)
-│   ├── dashboard/              # Interface React de monitoring
-│   │   ├── index.html          # Point d'entrée HTML
-│   │   ├── main.tsx            # Initialisation React
-│   │   ├── App.tsx             # Composant principal
-│   │   ├── types.ts            # Types pour l'interface
-│   │   ├── api.ts              # Client API pour le dashboard
-│   │   └── components/         # Composants React
-│   │       ├── StatsBar.tsx
-│   │       ├── FilterBar.tsx
-│   │       ├── EventCard.tsx
-│   │       ├── EventList.tsx
-│   │       └── TraceView.tsx
+│   │   └── suggestions.ts      # Routes /ai/suggestions/*
 │   └── utils/
+│       ├── cors.ts             # Helpers CORS
 │       └── dateUtils.ts
-├── vite.config.dashboard.ts    # Configuration Vite pour le dashboard
-├── openpro-api-react/           # Sous-module Git (dépôt externe)
+├── scripts/
+│   └── setup-local-db.js       # Script d'initialisation D1 locale
+├── openpro-api-react/          # Sous-module Git (dépôt externe)
 ├── docs/
-│   └── PRD.md                   # Ce document
-├── .env.example
+│   └── PRD.md                  # Ce document
+├── schema.sql                  # Schéma de base de données D1
+├── wrangler.toml               # Configuration Cloudflare Workers
+├── .dev.vars.example           # Exemple de variables secrètes
 ├── package.json
 ├── tsconfig.json
+├── MIGRATION.md                # Guide de migration Fastify → Workers
 └── README.md
 ```
 
 ### 2.3 Architecture actuelle
 
 Vue d'ensemble :
-- Fastify gère le serveur HTTP et le routage.
+- **Cloudflare Workers** exécute le code sur le réseau edge de Cloudflare (plus de 300 datacenters).
+- **itty-router** gère le routage HTTP avec une API simple et performante.
 - Les routes sont organisées par domaine fonctionnel (suppliers, webhooks, suggestions).
 - Les services métier encapsulent la logique de traitement des données OpenPro.
 - Le service IA utilise le Vercel AI SDK pour générer des suggestions basées sur l'analyse des réservations.
-- Le client OpenPro est instancié une seule fois et réutilisé par tous les services.
-- La clé API OpenPro est stockée dans les variables d'environnement et n'est jamais exposée au frontend.
+- **Cloudflare D1** (SQLite serverless) persiste les suggestions IA et autres données.
+- Le client OpenPro est créé via une factory pour chaque requête (compatible Workers).
+- La clé API OpenPro est stockée dans les secrets Cloudflare et n'est jamais exposée au frontend.
+- Les logs sont gérés via `console.log/error` et visibles dans le dashboard Cloudflare.
 
 ---
 
@@ -193,17 +185,9 @@ Vue d'ensemble :
 
 - `GET /health` - Vérification de l'état du serveur
 
-### 3.5 Routes monitoring (`/api/traffic`)
+### 3.5 Debug (développement)
 
-- `GET /api/traffic/events` - Liste des événements de trafic récents
-  - Query params : `limit`, `type`, `traceId`, `minDuration`, `hasError`
-- `GET /api/traffic/stats` - Statistiques agrégées du trafic
-- `GET /api/traffic/trace/:traceId` - Tous les événements d'une trace corrélée
-
-### 3.6 Dashboard
-
-- `GET /` - Interface de monitoring du trafic (redirige vers `/dashboard/index.html`)
-- `GET /dashboard/*` - Fichiers statiques du dashboard React
+- `GET /debug` - Informations de debug sur la requête et l'environnement (utile pour le développement)
 
 ---
 
@@ -238,7 +222,7 @@ Pour chaque suggestion, l'IA analyse :
 
 ### 4.4 Stockage
 
-Les suggestions sont stockées en mémoire (Map) pour l'instant. En production, migrer vers une base de données.
+Les suggestions sont stockées dans **Cloudflare D1** (SQLite serverless) via la table `ai_suggestions`. La persistance est garantie et les données sont répliquées automatiquement sur le réseau Cloudflare.
 
 ### 4.5 Configuration AI
 
@@ -250,19 +234,35 @@ Les suggestions sont stockées en mémoire (Map) pour l'instant. En production, 
 
 ## 5. Configuration et variables d'environnement
 
-### 5.1 Variables requises
+### 5.1 Configuration Cloudflare Workers
 
-- `PORT` - Port du serveur backend (défaut: 3001)
-- `OPENPRO_BASE_URL` - URL de l'API OpenPro (stub en dev: http://localhost:3000)
-- `OPENPRO_API_KEY` - Clé API OpenPro (gardée secrète côté serveur)
+La configuration se fait via `wrangler.toml` et les secrets Cloudflare.
+
+**Variables dans `wrangler.toml`** (non sensibles) :
+- `OPENPRO_BASE_URL` - URL de l'API OpenPro (défaut: https://api.open-pro.fr/tarif/multi/v1)
 - `FRONTEND_URL` - URL du frontend (pour CORS, défaut: http://localhost:4321)
-
-### 5.2 Variables AI
-
 - `AI_PROVIDER` - Provider IA (openai ou anthropic, défaut: openai)
+
+**Secrets Cloudflare** (sensibles, définis via `wrangler secret put`) :
+- `OPENPRO_API_KEY` - Clé API OpenPro (gardée secrète côté serveur)
 - `OPENAI_API_KEY` - Clé API OpenAI (si AI_PROVIDER=openai)
 - `ANTHROPIC_API_KEY` - Clé API Anthropic (si AI_PROVIDER=anthropic)
 - `CLOUDFLARE_AI_GATEWAY_URL` - URL optionnelle du Cloudflare AI Gateway
+
+**En développement local** :
+- Les secrets sont définis dans `.dev.vars` (non versionné, copier depuis `.dev.vars.example`)
+- La base D1 locale est créée automatiquement dans `.wrangler/state/`
+
+### 5.2 Base de données D1
+
+**En développement** :
+- La base D1 locale est créée automatiquement au premier `npm run dev`
+- Le schéma est appliqué automatiquement si la base n'existe pas
+
+**En production** :
+- Créer la base : `npm run d1:create`
+- Mettre à jour `database_id` dans `wrangler.toml`
+- Appliquer le schéma : `npm run d1:migrate`
 
 ---
 
@@ -270,14 +270,22 @@ Les suggestions sont stockées en mémoire (Map) pour l'instant. En production, 
 
 ### 6.1 Clé API OpenPro
 
-- Stockée uniquement dans les variables d'environnement côté serveur
+- Stockée dans les secrets Cloudflare (production) ou `.dev.vars` (développement local)
 - Jamais exposée au frontend
-- Non versionnée dans Git (fichier `.env` dans `.gitignore`)
+- Non versionnée dans Git (fichier `.dev.vars` dans `.gitignore`)
+- Gestion sécurisée via `wrangler secret put` en production
 
 ### 6.2 CORS
 
-- Configuration CORS pour autoriser uniquement le frontend configuré
-- URL du frontend configurée via `FRONTEND_URL`
+- Configuration CORS via headers manuels dans `src/utils/cors.ts`
+- URL du frontend configurée via `FRONTEND_URL` dans `wrangler.toml`
+- Support des requêtes preflight (OPTIONS)
+
+### 6.3 Secrets Cloudflare
+
+- Les secrets sont stockés de manière sécurisée dans Cloudflare
+- Jamais exposés dans le code ou les logs
+- Gestion via `wrangler secret put` ou le dashboard Cloudflare
 
 ---
 
@@ -298,17 +306,37 @@ OPENPRO_API_KEY=fake-key-for-testing
 ### 7.2 Workflow de développement
 
 1. Terminal 1 : Démarrer le stub server depuis la racine du monorepo `cd openpro-api-react && npm run stub` (port 3000)
-2. Terminal 2 : Démarrer le backend `cd OpenPro.Backend && npm run dev` (port 3001)
-3. Terminal 3 : Démarrer le frontend `cd OpenPro.Admin && npm run dev` (port 4321)
+2. Terminal 2 : Démarrer le backend `cd openpro-backend && npm run dev` (port 8787)
+   - Le backend démarre automatiquement avec Wrangler
+   - La base D1 locale est créée automatiquement si nécessaire
+   - Les logs apparaissent dans la console
+3. Terminal 3 : Démarrer le frontend `cd openpro-admin-react && npm run dev` (port 4321)
 
 **Note:** En développement dans un monorepo, le stub-server peut être lancé depuis `openpro-api-react/` à la racine. Le backend référence ce même dépôt via son sous-module.
 
+**Configuration locale** :
+- Créer `.dev.vars` à partir de `.dev.vars.example`
+- Remplir les secrets nécessaires
+- Le backend utilisera automatiquement ces variables en local
+
 ### 7.3 Production
 
-En production, pointer vers l'API réelle :
-```ini
-OPENPRO_BASE_URL=https://api.open-pro.fr/tarif/multi/v1
-OPENPRO_API_KEY=votre_vraie_cle_api
+**Configuration** :
+- Les variables non sensibles sont dans `wrangler.toml`
+- Les secrets sont configurés via `wrangler secret put` ou le dashboard Cloudflare
+- La base D1 de production doit être créée et migrée
+
+**Déploiement** :
+```bash
+# Configurer les secrets
+wrangler secret put OPENPRO_API_KEY
+wrangler secret put OPENAI_API_KEY
+
+# Déployer
+npm run deploy
+
+# Appliquer le schéma D1
+npm run d1:migrate
 ```
 
 ### 7.4 Configuration du sous-module openpro-api-react
@@ -333,170 +361,171 @@ Le sous-module pointe vers le dépôt externe `openpro-api-react`. Voir `SETUP.m
 npm run build
 ```
 
-Génère les fichiers JavaScript dans `dist/`.
+Compile TypeScript vers JavaScript (vérification de types uniquement, Workers utilise directement TypeScript).
 
-### 8.2 Démarrage
+### 8.2 Déploiement Cloudflare
 
 ```bash
-npm start
+npm run deploy
 ```
 
-Démarre le serveur avec Node.js depuis `dist/index.js`.
+Déploie le Worker sur Cloudflare. Le Worker est automatiquement distribué sur le réseau edge de Cloudflare (300+ datacenters).
 
-### 8.3 Variables d'environnement
+### 8.3 Configuration de production
 
-S'assurer que toutes les variables d'environnement requises sont configurées dans l'environnement de production.
+**Avant le premier déploiement** :
+1. Créer la base D1 : `npm run d1:create`
+2. Mettre à jour `database_id` dans `wrangler.toml`
+3. Configurer les secrets : `wrangler secret put <NAME>`
+4. Appliquer le schéma D1 : `npm run d1:migrate`
+
+**Avantages Cloudflare Workers** :
+- Scaling automatique (0 à millions de requêtes)
+- Latence minimale (edge computing)
+- Coût pay-per-use (gratuit jusqu'à 100k requêtes/jour)
+- Cold start < 10ms
+- Distribution globale automatique
 
 ---
 
-## 6. Traffic Monitoring Dashboard
+## 6. Monitoring et Observabilité
 
 ### 6.1 Vue d'ensemble
 
-Le backend intègre un système complet de monitoring du trafic HTTP qui capture automatiquement toutes les requêtes entrantes et sortantes (API OpenPro et appels IA). Une interface web React accessible sur `http://localhost:3001/` permet de visualiser en temps réel le trafic et d'analyser les performances.
+Le backend utilise les outils natifs de Cloudflare pour le monitoring et l'observabilité. Plus besoin de dashboard custom, tous les outils sont intégrés dans le dashboard Cloudflare.
 
-### 6.2 Architecture du monitoring
+### 6.2 Workers Analytics
 
-**Composants principaux :**
+**Métriques disponibles** :
+- Requêtes par seconde (RPS)
+- Latence P50, P75, P95, P99
+- Taux d'erreur (%)
+- CPU time (temps d'exécution)
+- Requêtes par statut HTTP (200, 400, 500, etc.)
+- Distribution géographique des requêtes
 
-1. **Traffic Monitor Service** (`trafficMonitor.ts`)
-   - Ring buffer en mémoire (1000 événements max)
-   - Stockage des événements de trafic avec métadonnées
-   - Calcul des statistiques agrégées
+**Accès** : Dashboard Cloudflare → Workers → Analytics
 
-2. **Correlation Context** (`correlationContext.ts`)
-   - Utilise Node.js `AsyncLocalStorage`
-   - Génère et propage un `traceId` unique par requête
-   - Permet de corréler les appels parents/enfants
+### 6.3 Workers Logs
 
-3. **Hooks Fastify** (dans `index.ts`)
-   - Hook `onRequest` : génère le traceId et timestamp de début
-   - Hook `onResponse` : calcule la durée et enregistre l'événement
-   - Capture automatique de toutes les requêtes entrantes
+**Fonctionnalités** :
+- Logs en temps réel (streaming)
+- Historique des logs (rétention configurable)
+- Filtres par :
+  - Statut HTTP
+  - Path/endpoint
+  - Erreurs uniquement
+  - Date/heure
+- Stack traces complètes pour les erreurs
+- Métadonnées de requête (headers, query params, body)
 
-4. **Wrappers pour appels sortants**
-   - Client OpenPro wrappé avec Proxy JavaScript
-   - Appels IA tracés dans `suggestionEngine.ts`
-   - Capture automatique des durées, statuts, et erreurs
+**Accès** : Dashboard Cloudflare → Workers → Logs
 
-### 6.3 Types d'événements capturés
+**En développement local** :
+- Les logs apparaissent directement dans la console avec `wrangler dev`
+- Format : `[traceId] message data`
 
-- **`incoming`** : Requêtes HTTP entrantes vers le backend
-  - Métadonnées : User-Agent, Origin, durée, status code
-  
-- **`outgoing-openpro`** : Appels sortants vers l'API OpenPro
-  - Métadonnées : idFournisseur, idHebergement, endpoint, durée, status code
-  
-- **`outgoing-ai`** : Appels vers les API IA (OpenAI/Anthropic)
-  - Métadonnées : provider, model, tokens utilisés, durée, status code
+### 6.4 D1 Analytics
 
-### 6.4 Système de corrélation
+**Métriques disponibles** :
+- Nombre de requêtes SQL exécutées
+- Latence des requêtes (P50, P99)
+- Stockage utilisé
+- Requêtes par type (SELECT, INSERT, UPDATE, DELETE)
+- Erreurs SQL
 
-Chaque requête entrante génère un `traceId` unique propagé automatiquement à tous les appels enfants (OpenPro, IA) grâce à `AsyncLocalStorage`. Cela permet de :
+**Accès** : Dashboard Cloudflare → D1 → Analytics
 
-- Visualiser la cascade complète d'une requête
-- Identifier les goulots d'étranglement
-- Tracer les erreurs à leur origine
-- Calculer les durées totales par trace
+### 6.5 Traçage des requêtes
 
-**Exemple de trace :**
+Chaque requête génère un `traceId` unique (UUID) qui est :
+- Loggé dans tous les appels console
+- Inclus dans les réponses d'erreur
+- Utilisable pour corréler les logs dans le dashboard Cloudflare
+
+**Exemple de log** :
 ```
-📥 POST /ai/suggestions/123/generate (traceId: abc-123)
-  ↳ 📤 GET /fournisseur/123/hebergements/456/tarif (450ms)
-  ↳ 📤 GET /fournisseur/123/hebergements/456/stock (380ms)
-  ↳ 🤖 AI OpenAI/gpt-4 (320ms, 1250 tokens)
-Total: 1.2s
+[abc-123] GET /api/suppliers/12345/accommodations
+[abc-123] GET /api/suppliers/12345/accommodations 200 (45ms)
 ```
 
-### 6.5 Interface utilisateur
+### 6.6 Alertes recommandées
 
-**Technologie :** React 18 + Vite + TypeScript
-
-**Fonctionnalités :**
-
-1. **Barre de statistiques**
-   - Total d'événements
-   - Compteurs par type (incoming, OpenPro, AI)
-   - Taux d'erreur
-   - Durée moyenne
-   - Requêtes lentes (>1s)
-
-2. **Filtres**
-   - Par type d'événement
-   - Erreurs seulement
-   - Par traceId (via clic sur événement)
-
-3. **Liste des événements**
-   - Affichage en temps réel (polling 2s)
-   - Color coding : succès (vert), erreur (rouge), lent (orange)
-   - Détails expandables : métadonnées, erreurs, User-Agent, etc.
-
-4. **Vue de trace (modal)**
-   - Arbre hiérarchique des événements corrélés
-   - Durée totale de la trace
-   - Durées individuelles par sous-requête
-   - Visualisation des cascades d'appels
-
-5. **Auto-refresh**
-   - Mise à jour automatique toutes les 2 secondes (activable/désactivable)
-   - Bouton de rafraîchissement manuel
-
-### 6.6 Développement et build
-
-**Développement :**
-- Dashboard : `npm run dev:dashboard` (port 5174 avec proxy vers backend)
-- Backend : `npm run dev` (port 3001)
-
-**Production :**
-- Build : `npm run build` (compile backend + dashboard)
-- Le dashboard est servi depuis `dist/dashboard/` par Fastify Static
-
-### 6.7 Limitations actuelles
-
-- Stockage en mémoire uniquement (pas de persistance)
-- Maximum 1000 événements dans le ring buffer
-- Pas d'authentification pour accéder au dashboard
-- Pas d'export des logs (JSON/CSV)
+Configurer dans Cloudflare Dashboard :
+- Taux d'erreur > 5%
+- Latence P99 > 500ms
+- Échecs D1 > 1%
+- CPU time > 50ms (moyenne)
 
 ---
 
 ## 9. Évolutions futures
 
-### 9.1 Base de données (TBD, voire à ne pas faire)
+### 9.1 Cache
 
-- Migrer le stockage des suggestions vers une base de données (PostgreSQL, MongoDB, etc.)
-- Stocker l'historique des réservations pour améliorer l'analyse IA
-
-### 9.2 Cache
-
-- Implémenter un cache pour les données fréquemment demandées (hébergements, types de tarifs)
+- Implémenter Cloudflare Cache API ou KV pour les données fréquemment demandées (hébergements, types de tarifs)
 - Réduire les appels à l'API OpenPro
+- TTL configurable par type de données
 
-### 9.3 Authentification
+### 9.2 Authentification
 
 - Ajouter un système d'authentification pour sécuriser l'API backend
 - Tokens JWT ou API keys pour le frontend
+- Utiliser Cloudflare Access ou Workers KV pour la gestion des sessions
 
-### 9.4 Monitoring
+### 9.3 Rate Limiting
 
-✅ **Implémenté** : Dashboard de monitoring du trafic HTTP avec interface React en temps réel
+- Implémenter Cloudflare Rate Limiting pour protéger l'API
+- Limites par endpoint et par IP
+- Protection contre les abus
+
+### 9.4 Monitoring avancé
+
+✅ **Implémenté** : Monitoring via dashboard Cloudflare natif
 
 **Améliorations futures :**
-- Persistance des événements en base de données
-- Export des logs (JSON, CSV)
-- Authentification pour l'accès au dashboard
-- WebSocket pour streaming en temps réel (au lieu de polling)
-- Alertes configurables (emails, Slack, etc.)
-- Intégration avec Prometheus/Grafana
-- Logging structuré avec Winston ou Pino
-- Métriques avancées et graphiques de tendances
+- Intégration avec Sentry pour le tracking d'erreurs
+- Métriques custom via Workers Analytics Engine
+- Alertes avancées (emails, Slack, PagerDuty)
+- Dashboards Grafana avec données Cloudflare
+- Logging structuré JSON pour meilleure analyse
+
+### 9.5 Performance
+
+- Optimisation des requêtes D1 (indexes, requêtes préparées)
+- Mise en cache des résultats IA fréquents
+- Compression des réponses (gzip/brotli)
+- Utilisation de Cloudflare R2 pour le stockage de fichiers volumineux si nécessaire
 
 ---
 
-## 10. Références
+## 10. Migration depuis Fastify
+
+Cette version a migré de Node.js/Fastify vers Cloudflare Workers. Voir `MIGRATION.md` pour les détails techniques complets.
+
+**Principaux changements** :
+- ✅ Runtime : Node.js → Cloudflare Workers (edge computing)
+- ✅ Framework : Fastify → itty-router
+- ✅ Base de données : Stockage en mémoire → Cloudflare D1 (SQLite serverless)
+- ✅ Configuration : dotenv → wrangler.toml + secrets Cloudflare
+- ✅ Monitoring : Dashboard custom React → Dashboard Cloudflare natif
+- ✅ Logging : Fastify logger → console.log/error (Cloudflare Logs)
+- ✅ Contexte : AsyncLocalStorage → Passage explicite du contexte
+
+**Avantages** :
+- Latence réduite (edge computing, < 10ms cold start)
+- Scaling automatique (0 à millions de requêtes)
+- Coût optimisé (pay-per-use, gratuit jusqu'à 100k req/jour)
+- Distribution globale automatique (300+ datacenters)
+- Monitoring intégré (Workers Analytics, Logs, D1 Metrics)
+
+## 11. Références
 
 - Documentation API Open Pro : https://documentation.open-system.fr/api-openpro/tarif/multi/v1/
 - Vercel AI SDK : https://ai-sdk.dev/
-- Fastify : https://www.fastify.io/
+- Cloudflare Workers : https://developers.cloudflare.com/workers/
+- Cloudflare D1 : https://developers.cloudflare.com/d1/
+- itty-router : https://itty.dev/
 - Cloudflare AI Gateway : https://developers.cloudflare.com/ai-gateway/
+- Guide de migration : Voir `MIGRATION.md` dans ce dépôt
 
