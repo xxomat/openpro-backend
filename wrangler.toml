@@ -3,8 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
 # Variables d'environnement pour le développement local
+# Note: Ces valeurs peuvent être surchargées par .dev.vars
 [vars]
-OPENPRO_BASE_URL = "https://api.open-pro.fr/tarif/multi/v1"
+# Par défaut, utiliser le stub server en développement local
+# Pour utiliser l'API réelle, ajoutez dans .dev.vars: OPENPRO_BASE_URL=https://api.open-pro.fr/tarif/multi/v1
+OPENPRO_BASE_URL = "http://localhost:3000"
 FRONTEND_URL = "http://localhost:4321"
 AI_PROVIDER = "openai"
 

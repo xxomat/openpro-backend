@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "npm run setup:local && wrangler dev",
     "dev:with-stub": "npm run check:stub && npm run dev",
-    "check:stub": "curl -f http://localhost:3000/health > /dev/null 2>&1 || (echo '⚠️  Stub server not running! Start it with: cd ../openpro-api-react && npm run stub' && exit 1)",
+    "check:stub": "node scripts/check-stub.js",
     "build": "tsc",
     "deploy": "wrangler deploy",
     "setup:local": "node scripts/setup-local-db.js",
