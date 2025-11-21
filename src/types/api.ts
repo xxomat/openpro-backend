@@ -24,8 +24,29 @@ export interface BookingDisplay {
   dateDepart: string;   // YYYY-MM-DD
   reference?: string;
   clientNom?: string;   // Nom du client (nom + prénom)
+  clientCivilite?: string; // Civilité du client (M, Mme, etc.)
+  clientEmail?: string; // Email du client
+  clientTelephone?: string; // Téléphone du client
+  clientRemarques?: string; // Remarques/notes sur le client
+  clientAdresse?: string; // Adresse postale
+  clientCodePostal?: string; // Code postal
+  clientVille?: string; // Ville
+  clientPays?: string; // Pays
+  clientDateNaissance?: string; // Date de naissance (stocké mais non affiché dans tooltip)
+  clientNationalite?: string; // Nationalité (stocké mais non affiché dans tooltip)
+  clientProfession?: string; // Profession (stocké mais non affiché dans tooltip)
+  clientSociete?: string; // Nom de l'entreprise/société
+  clientSiret?: string; // Numéro SIRET
+  clientTva?: string; // Numéro de TVA intracommunautaire
+  clientLangue?: string; // Langue préférée (stocké mais non affiché dans tooltip)
+  clientNewsletter?: boolean; // Consentement newsletter (stocké mais non affiché dans tooltip)
+  clientCgvAcceptees?: boolean; // Acceptation des CGV
   montantTotal?: number; // Prix total de la réservation
   nbPersonnes?: number; // Nombre de personnes
+  nbNuits?: number; // Nombre de nuits
+  typeTarifLibelle?: string; // Libellé du type de tarif
+  devise?: string; // Devise du paiement (EUR, etc.)
+  dateCreation?: string; // Date de création du dossier
 }
 
 export interface SupplierData {
