@@ -16,6 +16,7 @@ import { transformBulkToOpenProFormat, type BulkUpdateRequest } from '../service
 import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
 import { createLocalBooking } from '../services/openpro/localBookingService.js';
+import { syncBookingToStub } from '../services/openpro/stubSyncService.js';
 
 /**
  * Enregistre les routes des fournisseurs
@@ -343,6 +344,14 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       }, env);
       
       logger.info(`Created local booking for supplier ${idFournisseur}, accommodation ${bookingData.idHebergement}`);
+      
+      // Synchroniser avec le stub-server en mode test (non bloquant)
+      try {
+        await syncBookingToStub(createdBooking, idFournisseur, env);
+      } catch (syncError) {
+        // Ne pas faire échouer la création si la sync échoue
+        logger.warn('Failed to sync booking to stub-server (non-blocking):', syncError);
+      }
       
       return jsonResponse(createdBooking);
     } catch (error) {
