@@ -15,6 +15,7 @@ import { loadStockForAccommodation } from './stockService.js';
 import { loadRateTypes, buildRateTypesList } from './rateTypeService.js';
 import { loadRatesForAccommodation } from './rateService.js';
 import { loadBookingsForAccommodation } from './bookingService.js';
+import { loadLocalBookingsForAccommodation } from './localBookingService.js';
 import type { Env } from '../../index.js';
 
 /**
@@ -87,11 +88,20 @@ export async function getSupplierData(
 
     // Charger les réservations (toutes les réservations, pas de filtre par dates)
     try {
+      // Charger les réservations locales pour cet hébergement
+      const localBookings = await loadLocalBookingsForAccommodation(
+        idFournisseur,
+        acc.idHebergement,
+        env
+      );
+      
+      // Charger les réservations OpenPro et fusionner avec les locales
       const bookings = await loadBookingsForAccommodation(
         idFournisseur,
         acc.idHebergement,
         env,
-        signal
+        signal,
+        localBookings
       );
       nextBookings[acc.idHebergement] = bookings;
     } catch {

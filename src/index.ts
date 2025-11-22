@@ -8,6 +8,7 @@ import { Router, type IRequest } from 'itty-router';
 import { suppliersRouter } from './routes/suppliers.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { suggestionsRouter } from './routes/suggestions.js';
+import { cronRouter } from './routes/cron.js';
 import { corsHeaders, handleCors, jsonResponse } from './utils/cors.js';
 
 /**
@@ -162,6 +163,7 @@ export default {
       suppliersRouter(router, env, ctx);
       webhooksRouter(router, env, ctx);
       suggestionsRouter(router, env, ctx);
+      cronRouter(router, env, ctx);
       
       // Route par défaut (404) - doit être en dernier
       router.all('*', (request: IRequest) => {

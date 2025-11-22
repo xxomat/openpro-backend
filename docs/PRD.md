@@ -134,9 +134,26 @@ Vue d'ensemble :
 - `GET /api/suppliers/:idFournisseur/rate-types` - Liste des types de tarifs disponibles
 
 #### 3.1.5 Données complètes
-- `GET /api/suppliers/:idFournisseur/supplier-data` - Toutes les données (stock, tarifs, types) (query params `debut`, `fin`)
+- `GET /api/suppliers/:idFournisseur/supplier-data` - Toutes les données (stock, tarifs, types, réservations) (query params `debut`, `fin`)
+  - Retourne les réservations avec les champs `isPendingSync` et `isObsolete` pour les réservations Direct :
+    - `isPendingSync: true` : réservation Direct locale en attente de synchronisation avec OpenPro
+    - `isObsolete: true` : réservation Direct présente dans OpenPro mais sans correspondance locale dans la DB (détectée dynamiquement, **non stockée dans la DB**)
 
-#### 3.1.6 Mise à jour en bulk
+#### 3.1.6 Statut de synchronisation des réservations Direct
+- `GET /api/suppliers/:idFournisseur/local-bookings-sync-status` - Vérifier l'état de synchronisation et d'obsolescence des réservations Direct
+  - **Réponse** :
+    ```typescript
+    {
+      lastSyncCheck: string | null,      // Timestamp de la dernière vérification
+      pendingSyncCount: number,          // Nombre de réservations en attente de synchronisation
+      syncedCount: number,               // Nombre de réservations synchronisées
+      obsoleteCount: number,             // Nombre de réservations obsolètes (détectées dynamiquement, non stockées en DB)
+      lastChange: string | null         // Timestamp de la dernière modification d'état
+    }
+    ```
+  - Utilisé par le frontend pour le polling et détecter les changements (synchronisation ET obsolescence)
+
+#### 3.1.7 Mise à jour en bulk
 - `POST /api/suppliers/:idFournisseur/bulk-update` - Sauvegarder les modifications de tarifs et durées minimales en bulk
   - **Body** :
     ```typescript
@@ -181,11 +198,64 @@ Vue d'ensemble :
 - `PATCH /ai/suggestions/:id` - Mettre à jour le statut d'une suggestion (applied/rejected)
 - `POST /ai/suggestions/:idFournisseur/generate` - Déclencher manuellement une analyse
 
-### 3.4 Health check
+### 3.4 Routes cron (`/cron`)
+
+#### 3.4.1 Validation de synchronisation des réservations Direct
+- `GET /cron/validate-direct-bookings` - Validation automatique toutes les 15 minutes
+  - **Déclenchement** : Automatique via Cloudflare Cron (configuré dans `wrangler.toml`)
+  - **Fréquence** : Toutes les 2 minutes (`*/2 * * * *`) en développement, toutes les 15 minutes en production
+  - **Rôle** :
+    - Vérifie que les réservations locales sont bien synchronisées dans OpenPro
+    - Détecte les réservations obsolètes (Direct dans OpenPro sans correspondance locale)
+    - Met à jour `synced_at` dans `local_bookings` pour les réservations synchronisées
+    - **Important** : Les réservations obsolètes ne sont **PAS stockées dans la DB**. Elles sont détectées dynamiquement en comparant les réservations OpenPro avec les réservations locales.
+    - Log les résultats pour monitoring
+  - **Réponse** :
+    ```typescript
+    {
+      success: true,
+      timestamp: string,
+      stats: {
+        localBookingsCount: number,      // Nombre de réservations locales en attente de sync
+        syncedCount: number,             // Nombre de réservations nouvellement synchronisées
+        pendingCount: number,             // Nombre de réservations toujours en attente
+        obsoleteCount: number,           // Nombre total de réservations obsolètes détectées
+        bookings: Array<{                // Liste de toutes les réservations (locales + obsolètes)
+          reference: string | null,
+          dateArrivee: string,
+          synced: boolean,
+          obsolete: boolean
+        }>
+      }
+    }
+    ```
+  - **Note** : Le champ `bookings` inclut à la fois les réservations locales (depuis la DB) et les réservations obsolètes (détectées dynamiquement depuis OpenPro). Les réservations obsolètes sont identifiables par `obsolete: true`.
+
+#### 3.4.2 Gestion des réservations obsolètes
+
+**Principe** : Les réservations obsolètes sont des réservations Direct présentes dans OpenPro mais sans correspondance locale dans la base de données. Elles ne sont **jamais stockées dans la DB** pour éviter la pollution de données.
+
+**Détection** :
+- Les réservations obsolètes sont détectées dynamiquement lors du chargement des réservations
+- Comparaison entre les réservations Direct depuis OpenPro et les réservations locales dans la DB
+- Si une réservation Direct dans OpenPro n'a pas de correspondance locale (même `idHebergement`, `dateArrivee`, `dateDepart`), elle est marquée comme obsolète
+
+**Comportement** :
+- Le flag `isObsolete: true` est défini dynamiquement dans les réponses API
+- Les réservations obsolètes apparaissent dans l'interface admin avec un style hachuré
+- Le compte des obsolètes est disponible via l'endpoint `/cron/validate-direct-bookings`
+- Les réservations obsolètes sont incluses dans le champ `bookings` de la réponse du cron job
+
+**Avantages** :
+- Pas de pollution de la base de données avec des réservations qui n'existent plus localement
+- Détection en temps réel lors du chargement des données
+- Visibilité immédiate dans l'interface admin
+
+### 3.5 Health check
 
 - `GET /health` - Vérification de l'état du serveur
 
-### 3.5 Debug (développement)
+### 3.6 Debug (développement)
 
 - `GET /debug` - Informations de debug sur la requête et l'environnement (utile pour le développement)
 
@@ -499,7 +569,7 @@ Configurer dans Cloudflare Dashboard :
 
 ---
 
-## 10. Migration depuis Fastify
+## 11. Migration depuis Fastify
 
 Cette version a migré de Node.js/Fastify vers Cloudflare Workers. Voir `MIGRATION.md` pour les détails techniques complets.
 
@@ -519,7 +589,7 @@ Cette version a migré de Node.js/Fastify vers Cloudflare Workers. Voir `MIGRATI
 - Distribution globale automatique (300+ datacenters)
 - Monitoring intégré (Workers Analytics, Logs, D1 Metrics)
 
-## 11. Références
+## 12. Références
 
 - Documentation API Open Pro : https://documentation.open-system.fr/api-openpro/tarif/multi/v1/
 - Vercel AI SDK : https://ai-sdk.dev/

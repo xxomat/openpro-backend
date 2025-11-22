@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS local_bookings (
   reference TEXT,
   date_creation TEXT NOT NULL DEFAULT (datetime('now')),
   date_modification TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at TEXT, -- Date/heure de synchronisation avec OpenPro (NULL = en latence)
   
   CHECK (date_depart > date_arrivee),
   CHECK (nb_personnes > 0)
@@ -27,6 +28,9 @@ CREATE INDEX IF NOT EXISTS idx_local_bookings_hebergement
 
 CREATE INDEX IF NOT EXISTS idx_local_bookings_dates 
   ON local_bookings(date_arrivee, date_depart);
+
+CREATE INDEX IF NOT EXISTS idx_local_bookings_synced_at 
+  ON local_bookings(synced_at);
 
 -- Table des suggestions IA
 CREATE TABLE IF NOT EXISTS ai_suggestions (

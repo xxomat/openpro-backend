@@ -59,6 +59,8 @@ export interface BookingDisplay {
   devise?: string; // Devise du paiement (EUR, etc.)
   dateCreation?: string; // Date de création du dossier
   plateformeReservation: PlateformeReservation; // Plateforme d'origine de la réservation (Unknown si non renseignée)
+  isPendingSync?: boolean; // true si réservation Direct locale en attente de synchronisation avec OpenPro
+  isObsolete?: boolean; // true si réservation Direct supprimée localement mais toujours présente dans OpenPro
 }
 
 export interface SupplierData {

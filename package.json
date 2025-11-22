@@ -12,7 +12,8 @@
     "setup:local": "node scripts/setup-local-db.js",
     "d1:create": "wrangler d1 create openpro-db",
     "d1:migrate": "wrangler d1 execute openpro-db --file=./schema.sql",
-    "d1:migrate:local": "wrangler d1 execute openpro-db --local --file=./schema.sql"
+    "d1:migrate:local": "wrangler d1 execute openpro-db --local --file=./schema.sql",
+    "d1:migrate:add-synced-at": "wrangler d1 execute openpro-db --local --file=./migrations/001_add_synced_at_obsolete.sql"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.45",

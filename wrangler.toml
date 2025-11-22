@@ -29,3 +29,7 @@ database_id = "00000000-0000-0000-0000-000000000000" # Vide = base locale automa
 port = 8787
 local_protocol = "http"
 
+# Configuration des triggers cron (toutes les 15 minutes)
+[triggers]
+crons = ["*/2 * * * *"]
+

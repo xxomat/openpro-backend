@@ -221,4 +221,64 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       );
     }
   });
+
+  // GET /api/suppliers/:idFournisseur/local-bookings-sync-status
+  router.get('/api/suppliers/:idFournisseur/local-bookings-sync-status', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    }
+    
+    try {
+      // Compter les réservations locales en attente de synchronisation
+      const pendingResult = await env.DB.prepare(`
+        SELECT COUNT(*) as count FROM local_bookings
+        WHERE id_fournisseur = ? AND synced_at IS NULL
+      `).bind(idFournisseur).first();
+      const pendingSyncCount = (pendingResult as any)?.count || 0;
+      
+      // Compter les réservations locales synchronisées
+      const syncedResult = await env.DB.prepare(`
+        SELECT COUNT(*) as count FROM local_bookings
+        WHERE id_fournisseur = ? AND synced_at IS NOT NULL
+      `).bind(idFournisseur).first();
+      const syncedCount = (syncedResult as any)?.count || 0;
+      
+      // Les réservations obsolètes ne sont pas stockées dans la DB
+      // Elles sont détectées dynamiquement lors du chargement des réservations
+      // Pour obtenir le compte exact, il faudrait charger toutes les réservations OpenPro
+      // Pour l'instant, on retourne 0 (sera calculé dynamiquement côté frontend si nécessaire)
+      const obsoleteCount = 0;
+      
+      // Récupérer la date de dernière modification (synced_at ou date_modification)
+      const lastChangeResult = await env.DB.prepare(`
+        SELECT MAX(COALESCE(synced_at, date_modification)) as last_change FROM local_bookings
+        WHERE id_fournisseur = ?
+      `).bind(idFournisseur).first();
+      const lastChange = (lastChangeResult as any)?.last_change || null;
+      
+      // Récupérer la date de dernière synchronisation (max synced_at)
+      const lastSyncCheckResult = await env.DB.prepare(`
+        SELECT MAX(synced_at) as last_sync_check FROM local_bookings
+        WHERE id_fournisseur = ? AND synced_at IS NOT NULL
+      `).bind(idFournisseur).first();
+      const lastSyncCheck = (lastSyncCheckResult as any)?.last_sync_check || null;
+      
+      return jsonResponse({
+        lastSyncCheck,
+        pendingSyncCount,
+        syncedCount,
+        obsoleteCount,
+        lastChange
+      });
+    } catch (error) {
+      logger.error('Error fetching sync status', error);
+      return errorResponse(
+        'Failed to fetch sync status',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
 }

@@ -10,6 +10,9 @@ import { PlateformeReservation } from '../../types/api.js';
 import { getOpenProClient } from '../openProClient.js';
 import type { Booking, DossierTransaction } from '../../../openpro-api-react/src/client/types.js';
 import type { Env } from '../../index.js';
+import { 
+  updateSyncedStatusForLocalBookings
+} from './localBookingService.js';
 
 /**
  * Détermine la plateforme de réservation à partir des informations de transaction
@@ -51,6 +54,11 @@ function getPlateformeReservation(
  * et filtre celles qui correspondent à l'hébergement donné. Les réservations sont
  * transformées en BookingDisplay pour l'affichage dans le frontend.
  * 
+ * Si des réservations locales sont fournies, elles sont fusionnées avec les réservations OpenPro :
+ * - Les réservations locales qui correspondent à une réservation OpenPro sont remplacées par la version OpenPro
+ * - Les réservations locales sans correspondance sont ajoutées avec isPendingSync: true
+ * - Les réservations Direct dans OpenPro sans correspondance locale sont marquées comme obsolètes
+ * 
  * Note: Toutes les réservations sont chargées (pas de filtre par dates), le frontend
  * se chargera de filtrer celles à afficher selon la plage de dates sélectionnée.
  * 
@@ -58,6 +66,7 @@ function getPlateformeReservation(
  * @param idHebergement - Identifiant de l'hébergement
  * @param env - Variables d'environnement Workers
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
+ * @param localBookings - Réservations locales optionnelles à fusionner
  * @returns Tableau des réservations pour cet hébergement
  * @throws {Error} Peut lever une erreur si le chargement des réservations échoue
  * @throws {DOMException} Peut lever une AbortError si la requête est annulée
@@ -66,7 +75,8 @@ export async function loadBookingsForAccommodation(
   idFournisseur: number,
   idHebergement: number,
   env: Env,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  localBookings?: BookingDisplay[]
 ): Promise<BookingDisplay[]> {
   const openProClient = getOpenProClient(env);
   // Charger toutes les réservations du fournisseur (pas de filtre par dates)
@@ -178,10 +188,94 @@ export async function loadBookingsForAccommodation(
       typeTarifLibelle,
       devise,
       dateCreation,
-      plateformeReservation
+      plateformeReservation,
+      isPendingSync: false,
+      isObsolete: false
     });
   }
   
-  return bookings;
+  // Si des réservations locales sont fournies, les fusionner
+  if (localBookings && localBookings.length > 0) {
+    // Filtrer les réservations Direct depuis OpenPro
+    const openProDirectBookings = bookings.filter(b => 
+      b.plateformeReservation === PlateformeReservation.Directe
+    );
+    
+    // Mettre à jour synced_at pour les réservations locales synchronisées
+    await updateSyncedStatusForLocalBookings(
+      idFournisseur,
+      localBookings,
+      openProDirectBookings,
+      env
+    );
+    
+    // Note: Les réservations obsolètes sont détectées dynamiquement ci-dessous
+    // Elles ne sont PAS stockées dans la DB, seulement marquées avec isObsolete: true
+    
+    // Fusionner les réservations
+    const mergedBookings: BookingDisplay[] = [];
+    const processedLocalIds = new Set<string>();
+    
+    // D'abord, ajouter toutes les réservations OpenPro
+    for (const openProBooking of bookings) {
+      if (openProBooking.plateformeReservation === PlateformeReservation.Directe) {
+        // Vérifier si cette réservation Direct correspond à une réservation locale
+        const localMatch = localBookings.find(localBooking =>
+          localBooking.idHebergement === openProBooking.idHebergement &&
+          localBooking.dateArrivee === openProBooking.dateArrivee &&
+          localBooking.dateDepart === openProBooking.dateDepart
+        );
+        
+        if (localMatch) {
+          // Garder la version OpenPro (plus complète), marquer comme synchronisée
+          mergedBookings.push({
+            ...openProBooking,
+            isPendingSync: false,
+            isObsolete: false
+          });
+          // Marquer la réservation locale comme traitée
+          processedLocalIds.add(`${localMatch.idHebergement}-${localMatch.dateArrivee}-${localMatch.dateDepart}`);
+        } else {
+          // Réservation Direct dans OpenPro sans correspondance locale = obsolète
+          mergedBookings.push({
+            ...openProBooking,
+            isPendingSync: false,
+            isObsolete: true
+          });
+        }
+      } else {
+        // Réservation non-Directe, l'ajouter telle quelle
+        mergedBookings.push(openProBooking);
+      }
+    }
+    
+    // Ensuite, ajouter les réservations locales qui n'ont pas de correspondance OpenPro
+    for (const localBooking of localBookings) {
+      const localId = `${localBooking.idHebergement}-${localBooking.dateArrivee}-${localBooking.dateDepart}`;
+      if (!processedLocalIds.has(localId)) {
+        // Pas de correspondance OpenPro, ajouter avec isPendingSync: true
+        mergedBookings.push({
+          ...localBooking,
+          isPendingSync: localBooking.isPendingSync ?? true,
+          isObsolete: false
+        });
+      }
+    }
+    
+    return mergedBookings;
+  }
+  
+  // Si pas de réservations locales, toutes les réservations Direct depuis OpenPro sont obsolètes
+  // (elles n'ont pas de correspondance locale dans la DB)
+  return bookings.map(booking => {
+    if (booking.plateformeReservation === PlateformeReservation.Directe) {
+      return {
+        ...booking,
+        isPendingSync: false,
+        isObsolete: true // Pas de réservation locale = obsolète
+      };
+    }
+    return booking; // Les réservations non-Directe restent inchangées
+  });
 }
 
