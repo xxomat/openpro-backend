@@ -129,6 +129,22 @@ Vue d'ensemble :
 
 #### 3.1.3 Stock
 - `GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/stock` - Récupérer le stock (query params `debut`, `fin`)
+- `POST /api/suppliers/:idFournisseur/accommodations/:idHebergement/stock` - Mettre à jour le stock
+  - **Corps de la requête** :
+    ```typescript
+    {
+      jours: Array<{
+        date: string;        // Format: YYYY-MM-DD
+        dispo: number;       // Disponibilité (généralement 0 ou 1)
+      }>
+    }
+    ```
+  - **Comportement** :
+    - Met à jour ou crée les entrées de stock pour les dates spécifiées.
+    - Les dates valides peuvent être créées si elles n'existent pas déjà dans OpenPro.
+    - Si une date est déjà présente dans OpenPro, sa disponibilité est mise à jour.
+    - Retourne une réponse de succès ou une erreur en cas d'échec.
+  - **Intégration OpenPro** : Utilise `openProClient.updateStock()` pour propager les changements à l'API OpenPro.
 
 #### 3.1.4 Types de tarifs
 - `GET /api/suppliers/:idFournisseur/rate-types` - Liste des types de tarifs disponibles
