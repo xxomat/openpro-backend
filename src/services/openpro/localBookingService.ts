@@ -142,6 +142,100 @@ export async function updateSyncedStatusForLocalBookings(
 }
 
 /**
+ * Interface pour les données de création d'une réservation locale
+ */
+export interface CreateLocalBookingData {
+  idFournisseur: number;
+  idHebergement: number;
+  dateArrivee: string; // Format: YYYY-MM-DD
+  dateDepart: string;  // Format: YYYY-MM-DD
+  clientNom?: string;
+  clientPrenom?: string;
+  clientEmail?: string;
+  clientTelephone?: string;
+  nbPersonnes?: number;
+  montantTotal?: number;
+  reference?: string;
+}
+
+/**
+ * Crée une nouvelle réservation locale dans la DB
+ * 
+ * @param data - Données de la réservation à créer
+ * @param env - Variables d'environnement Workers
+ * @returns La réservation créée au format BookingDisplay
+ * @throws {Error} Si la création échoue (dates invalides, contraintes DB, etc.)
+ */
+export async function createLocalBooking(
+  data: CreateLocalBookingData,
+  env: Env
+): Promise<BookingDisplay> {
+  // Valider les dates
+  if (data.dateDepart <= data.dateArrivee) {
+    throw new Error('date_depart must be greater than date_arrivee');
+  }
+
+  // Valider le nombre de personnes
+  const nbPersonnes = data.nbPersonnes ?? 2;
+  if (nbPersonnes <= 0) {
+    throw new Error('nb_personnes must be greater than 0');
+  }
+
+  // Insérer la réservation dans la DB
+  // L'ID sera généré automatiquement par SQLite
+  await env.DB.prepare(`
+    INSERT INTO local_bookings (
+      id_fournisseur,
+      id_hebergement,
+      date_arrivee,
+      date_depart,
+      client_nom,
+      client_prenom,
+      client_email,
+      client_telephone,
+      nb_personnes,
+      montant_total,
+      reference,
+      synced_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+  `).bind(
+    data.idFournisseur,
+    data.idHebergement,
+    data.dateArrivee,
+    data.dateDepart,
+    data.clientNom || null,
+    data.clientPrenom || null,
+    data.clientEmail || null,
+    data.clientTelephone || null,
+    nbPersonnes,
+    data.montantTotal || null,
+    data.reference || null
+  ).run();
+
+  // Récupérer la réservation créée en utilisant les critères uniques
+  // (plus fiable que last_row_id en D1)
+  const createdRow = await env.DB.prepare(`
+    SELECT * FROM local_bookings
+    WHERE id_fournisseur = ? AND id_hebergement = ? 
+      AND date_arrivee = ? AND date_depart = ?
+      AND date_creation >= datetime('now', '-1 second')
+    ORDER BY date_creation DESC
+    LIMIT 1
+  `).bind(
+    data.idFournisseur,
+    data.idHebergement,
+    data.dateArrivee,
+    data.dateDepart
+  ).first() as LocalBookingRow | null;
+
+  if (!createdRow) {
+    throw new Error('Failed to retrieve created booking');
+  }
+
+  return convertRowToBookingDisplay(createdRow);
+}
+
+/**
  * Convertit une ligne de DB en BookingDisplay
  * 
  * @param row - Ligne de la table local_bookings

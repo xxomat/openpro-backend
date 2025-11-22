@@ -15,6 +15,7 @@ import { loadRateTypes, buildRateTypesList } from '../services/openpro/rateTypeS
 import { transformBulkToOpenProFormat, type BulkUpdateRequest } from '../services/openpro/bulkUpdateService.js';
 import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
+import { createLocalBooking } from '../services/openpro/localBookingService.js';
 
 /**
  * Enregistre les routes des fournisseurs
@@ -218,6 +219,145 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
         'Failed to save bulk updates',
         500,
         error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // POST /api/suppliers/:idFournisseur/local-bookings
+  router.post('/api/suppliers/:idFournisseur/local-bookings', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    }
+    
+    let bookingData: {
+      idHebergement: number;
+      dateArrivee: string;
+      dateDepart: string;
+      clientNom?: string;
+      clientPrenom?: string;
+      clientEmail?: string;
+      clientTelephone?: string;
+      nbPersonnes?: number;
+      montantTotal?: number;
+      reference?: string;
+    };
+    
+    try {
+      bookingData = await request.json();
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
+    }
+    
+    // Valider les champs obligatoires
+    if (!bookingData.idHebergement || !bookingData.dateArrivee || !bookingData.dateDepart) {
+      return errorResponse('Missing required fields: idHebergement, dateArrivee, dateDepart', 400);
+    }
+    
+    // Valider les types
+    if (typeof bookingData.idHebergement !== 'number') {
+      return errorResponse('idHebergement must be a number', 400);
+    }
+    
+    // Valider le format des dates (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(bookingData.dateArrivee) || !dateRegex.test(bookingData.dateDepart)) {
+      return errorResponse('Dates must be in YYYY-MM-DD format', 400);
+    }
+    
+    try {
+      // Séparer le nom complet en nom et prénom si nécessaire
+      let clientNom = bookingData.clientNom;
+      let clientPrenom = bookingData.clientPrenom;
+      
+      // Si on a seulement clientNom (nom complet), essayer de le séparer
+      if (clientNom && !clientPrenom) {
+        const parts = clientNom.trim().split(/\s+/);
+        if (parts.length > 1) {
+          // Dernier mot = nom de famille, reste = prénom
+          clientNom = parts[parts.length - 1];
+          clientPrenom = parts.slice(0, -1).join(' ');
+        } else {
+          // Un seul mot = considérer comme nom de famille
+          clientNom = parts[0];
+          clientPrenom = undefined;
+        }
+      }
+      
+      // Mettre à jour le stock à 0 pour toutes les dates de la réservation AVANT de créer la réservation
+      // Si cela échoue, la réservation ne sera pas créée
+      const openProClient = getOpenProClient(env);
+      
+      // Calculer toutes les dates entre dateArrivee (inclus) et dateDepart (exclus)
+      // Le stock doit être à 0 du premier jour inclus au dernier jour inclus
+      // dateDepart est exclu car c'est la date de départ (dernière nuit = dateDepart - 1 jour)
+      const dates: string[] = [];
+      const [startYear, startMonth, startDay] = bookingData.dateArrivee.split('-').map(Number);
+      const [endYear, endMonth, endDay] = bookingData.dateDepart.split('-').map(Number);
+      
+      // Créer des dates en locale pour éviter les problèmes de fuseau horaire
+      let currentDate = new Date(startYear, startMonth - 1, startDay);
+      const endDate = new Date(endYear, endMonth - 1, endDay);
+      
+      // Ajouter toutes les dates du premier jour inclus au dernier jour inclus (dateDepart est exclu)
+      while (currentDate < endDate) {
+        const year = currentDate.getFullYear();
+        const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const day = String(currentDate.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        dates.push(dateStr);
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      
+      // Créer le payload pour mettre le stock à 0 pour chaque date
+      const stockPayload = {
+        jours: dates.map(date => ({
+          date,
+          dispo: 0
+        }))
+      };
+      
+      // Mettre à jour le stock dans OpenPro (si cela échoue, la création de réservation échouera aussi)
+      await openProClient.updateStock(
+        idFournisseur,
+        bookingData.idHebergement,
+        stockPayload
+      );
+      
+      logger.info(`Updated stock to 0 for supplier ${idFournisseur}, accommodation ${bookingData.idHebergement}, dates ${dates[0]} to ${dates[dates.length - 1]}`);
+      
+      // Créer la réservation en DB seulement si la mise à jour du stock a réussi
+      const createdBooking = await createLocalBooking({
+        idFournisseur,
+        idHebergement: bookingData.idHebergement,
+        dateArrivee: bookingData.dateArrivee,
+        dateDepart: bookingData.dateDepart,
+        clientNom,
+        clientPrenom,
+        clientEmail: bookingData.clientEmail,
+        clientTelephone: bookingData.clientTelephone,
+        nbPersonnes: bookingData.nbPersonnes,
+        montantTotal: bookingData.montantTotal,
+        reference: bookingData.reference
+      }, env);
+      
+      logger.info(`Created local booking for supplier ${idFournisseur}, accommodation ${bookingData.idHebergement}`);
+      
+      return jsonResponse(createdBooking);
+    } catch (error) {
+      logger.error('Error creating local booking', error);
+      
+      // Fournir un message d'erreur plus explicite si c'est une erreur de stock
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isStockError = errorMessage.includes('stock') || errorMessage.includes('Stock') || errorMessage.includes('Failed to update stock');
+      
+      return errorResponse(
+        isStockError 
+          ? 'Failed to update stock: ' + errorMessage
+          : 'Failed to create local booking: ' + errorMessage,
+        500,
+        errorMessage
       );
     }
   });
