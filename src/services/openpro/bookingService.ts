@@ -6,9 +6,43 @@
  */
 
 import type { BookingDisplay } from '../../types/api.js';
+import { PlateformeReservation } from '../../types/api.js';
 import { getOpenProClient } from '../openProClient.js';
-import type { Booking } from '../../../openpro-api-react/src/client/types.js';
+import type { Booking, DossierTransaction } from '../../../openpro-api-react/src/client/types.js';
 import type { Env } from '../../index.js';
+
+/**
+ * Détermine la plateforme de réservation à partir des informations de transaction
+ * 
+ * @param transaction - Informations de transaction du dossier de réservation
+ * @returns La plateforme de réservation ou Unknown si aucune transaction n'est présente
+ */
+function getPlateformeReservation(
+  transaction?: DossierTransaction
+): PlateformeReservation {
+  if (!transaction) {
+    return PlateformeReservation.Unknown;
+  }
+
+  // Priorité : Booking.com > Xotelia > OpenPro > Directe
+  if (transaction.transactionBooking) {
+    return PlateformeReservation.BookingCom;
+  }
+  
+  if (transaction.transactionXotelia) {
+    return PlateformeReservation.Xotelia;
+  }
+  
+  if (transaction.transactionOpenSystem) {
+    return PlateformeReservation.OpenPro;
+  }
+  
+  if (transaction.transactionResaLocale) {
+    return PlateformeReservation.Directe;
+  }
+
+  return PlateformeReservation.Unknown;
+}
 
 /**
  * Charge toutes les réservations pour un hébergement
@@ -111,6 +145,9 @@ export async function loadBookingsForAccommodation(
     // Extraire la date de création
     const dateCreation = booking.dateCreation;
     
+    // Déterminer la plateforme de réservation
+    const plateformeReservation = getPlateformeReservation(booking.transaction);
+    
     bookings.push({
       idDossier: booking.idDossier ?? 0,
       idHebergement: booking.hebergement.idHebergement ?? idHebergement,
@@ -140,7 +177,8 @@ export async function loadBookingsForAccommodation(
       nbNuits,
       typeTarifLibelle,
       devise,
-      dateCreation
+      dateCreation,
+      plateformeReservation
     });
   }
   

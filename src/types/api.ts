@@ -5,6 +5,17 @@
  * du backend, correspondant aux structures de données exposées au frontend.
  */
 
+/**
+ * Enum pour les plateformes de réservation
+ */
+export enum PlateformeReservation {
+  BookingCom = 'Booking.com',
+  Directe = 'Directe',
+  OpenPro = 'OpenPro',
+  Xotelia = 'Xotelia',
+  Unknown = 'Unknown'
+}
+
 export interface Accommodation {
   idHebergement: number;
   nomHebergement: string;
@@ -47,6 +58,7 @@ export interface BookingDisplay {
   typeTarifLibelle?: string; // Libellé du type de tarif
   devise?: string; // Devise du paiement (EUR, etc.)
   dateCreation?: string; // Date de création du dossier
+  plateformeReservation: PlateformeReservation; // Plateforme d'origine de la réservation (Unknown si non renseignée)
 }
 
 export interface SupplierData {
