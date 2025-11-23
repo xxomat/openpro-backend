@@ -69,7 +69,6 @@ export async function loadBookingsForAccommodation(
     
     bookings.push({
       idDossier: booking.idDossier ?? 0,
-      idHebergement: booking.hebergement.idHebergement ?? idHebergement,
       dateArrivee: booking.hebergement.dateArrivee,
       dateDepart: booking.hebergement.dateDepart,
       reference: booking.reference,
