@@ -11,10 +11,7 @@ import { z } from 'zod';
 import { getAIModel } from '../../config/ai.js';
 import type { SuggestionRequest, PricingSuggestion } from '../../types/suggestions.js';
 import { generateAnalysisPrompt } from './analysisPrompts.js';
-import { getTraceId } from '../correlationContext.js';
-import { trafficMonitor } from '../trafficMonitor.js';
-import { randomUUID } from 'crypto';
-import { config } from '../../config/env.js';
+import type { Env } from '../../index.js';
 
 /**
  * Type pour une suggestion individuelle depuis l'IA
@@ -63,15 +60,16 @@ const suggestionSchema = z.object({
  * @throws {Error} Peut lever une erreur si la génération échoue
  */
 export async function generatePricingSuggestions(
-  request: SuggestionRequest
+  request: SuggestionRequest,
+  env: Env
 ): Promise<PricingSuggestion[]> {
-  const model = getAIModel();
+  const model = getAIModel(env);
   const prompt = generateAnalysisPrompt(request);
-  const traceId = getTraceId() || randomUUID();
+  const traceId = crypto.randomUUID();
   const startTime = Date.now();
   
   // Déterminer le provider et le model name
-  const provider = config.AI_PROVIDER || 'openai';
+  const provider = env.AI_PROVIDER || 'openai';
   const modelName = typeof model === 'string' ? model : 'unknown';
   
   try {
@@ -94,16 +92,13 @@ export async function generatePricingSuggestions(
       total: usage.totalTokens
     } : undefined;
 
-    // Enregistrer l'appel IA réussi
-    trafficMonitor.logAI(
-      traceId,
+    // Logger l'appel IA réussi
+    console.log(`AI call successful [${traceId}]`, {
       provider,
-      modelName,
+      model: modelName,
       duration,
-      200,
-      undefined,
-      tokensUsed
-    );
+      tokens: tokensUsed
+    });
 
     // Extraire les suggestions depuis l'objet retourné et valider le type
     const aiResponse = result.object as { suggestions: AISuggestionItem[] };
@@ -128,15 +123,13 @@ export async function generatePricingSuggestions(
     const duration = Date.now() - startTime;
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-    // Enregistrer l'appel IA échoué
-    trafficMonitor.logAI(
-      traceId,
+    // Logger l'appel IA échoué
+    console.error(`AI call failed [${traceId}]`, {
       provider,
-      modelName,
+      model: modelName,
       duration,
-      500,
-      errorMessage
-    );
+      error: errorMessage
+    });
 
     throw error;
   }

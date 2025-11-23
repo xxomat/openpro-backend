@@ -5,9 +5,10 @@
  * depuis l'API OpenPro et normaliser les données dans le format interne.
  */
 
-import { openProClient } from '../openProClient.js';
+import { getOpenProClient } from '../openProClient.js';
 import type { Accommodation } from '../../types/api.js';
 import type { AccommodationListResponse, ApiAccommodation } from '../../types/apiTypes.js';
+import type { Env } from '../../index.js';
 
 /**
  * Charge la liste des hébergements pour un fournisseur donné
@@ -17,6 +18,7 @@ import type { AccommodationListResponse, ApiAccommodation } from '../../types/ap
  * vers le format interne { idHebergement, nomHebergement }.
  * 
  * @param idFournisseur - Identifiant du fournisseur
+ * @param env - Variables d'environnement Workers
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
  * @returns Promise résolue avec la liste des hébergements normalisés
  * @throws {Error} Peut lever une erreur si le chargement des hébergements échoue
@@ -24,8 +26,10 @@ import type { AccommodationListResponse, ApiAccommodation } from '../../types/ap
  */
 export async function getAccommodations(
   idFournisseur: number,
+  env: Env,
   signal?: AbortSignal
 ): Promise<Accommodation[]> {
+  const openProClient = getOpenProClient(env);
   const resp = await openProClient.listAccommodations(idFournisseur);
   if (signal?.aborted) throw new Error('Cancelled');
   

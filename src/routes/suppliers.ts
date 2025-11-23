@@ -1,71 +1,62 @@
 /**
  * Routes pour les fournisseurs
  * 
- * Ce fichier contient toutes les routes API REST pour les données des fournisseurs :
- * hébergements, tarifs, stock, types de tarifs, et données complètes.
+ * Adaptées pour Cloudflare Workers avec itty-router
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { IRequest, Router } from 'itty-router';
+import type { Env, RequestContext } from '../index.js';
+import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { getAccommodations } from '../services/openpro/accommodationService.js';
 import { getSupplierData } from '../services/openpro/supplierDataService.js';
 import { loadRatesForAccommodation } from '../services/openpro/rateService.js';
 import { loadStockForAccommodation } from '../services/openpro/stockService.js';
 import { loadRateTypes, buildRateTypesList } from '../services/openpro/rateTypeService.js';
 import { transformBulkToOpenProFormat, type BulkUpdateRequest } from '../services/openpro/bulkUpdateService.js';
-import { openProClient } from '../services/openProClient.js';
+import { getOpenProClient } from '../services/openProClient.js';
+import { createLogger } from '../index.js';
 
 /**
  * Enregistre les routes des fournisseurs
- * 
- * @param fastify - Instance Fastify
  */
-export async function suppliersRoutes(fastify: FastifyInstance) {
+export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
+  const logger = createLogger(ctx);
+  
   // GET /api/suppliers/:idFournisseur/accommodations
-  fastify.get<{
-    Params: { idFournisseur: string }
-  }>('/:idFournisseur/accommodations', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
+  router.get('/api/suppliers/:idFournisseur/accommodations', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
     if (isNaN(idFournisseur)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idFournisseur',
-        message: 'idFournisseur must be a number'
-      });
+      return errorResponse('Invalid idFournisseur: must be a number', 400);
     }
     
     try {
-      const accommodations = await getAccommodations(idFournisseur);
-      return accommodations;
+      const accommodations = await getAccommodations(idFournisseur, env);
+      return jsonResponse(accommodations);
     } catch (error) {
-      fastify.log.error({ error }, 'Error fetching accommodations');
-      reply.status(500).send({ 
-        error: 'Failed to fetch accommodations',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error fetching accommodations', error);
+      return errorResponse(
+        'Failed to fetch accommodations',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
     }
   });
 
   // GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/rates
-  fastify.get<{
-    Params: { idFournisseur: string; idHebergement: string };
-    Querystring: { debut: string; fin: string }
-  }>('/:idFournisseur/accommodations/:idHebergement/rates', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
-    const idHebergement = parseInt(request.params.idHebergement, 10);
-    const { debut, fin } = request.query;
+  router.get('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rates', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const url = new URL(request.url);
+    const debut = url.searchParams.get('debut');
+    const fin = url.searchParams.get('fin');
     
     if (isNaN(idFournisseur) || isNaN(idHebergement)) {
-      return reply.status(400).send({ 
-        error: 'Invalid parameters',
-        message: 'idFournisseur and idHebergement must be numbers'
-      });
+      return errorResponse('Invalid parameters: idFournisseur and idHebergement must be numbers', 400);
     }
     
     if (!debut || !fin) {
-      return reply.status(400).send({ 
-        error: 'Missing required query parameters',
-        message: 'debut and fin are required (format: YYYY-MM-DD)'
-      });
+      return errorResponse('Missing required query parameters: debut and fin (format: YYYY-MM-DD)', 400);
     }
     
     try {
@@ -75,201 +66,159 @@ export async function suppliersRoutes(fastify: FastifyInstance) {
         idHebergement,
         debut,
         fin,
-        discoveredRateTypes
+        discoveredRateTypes,
+        env
       );
-      return ratesData;
+      return jsonResponse(ratesData);
     } catch (error) {
-      fastify.log.error({ error }, 'Error fetching rates');
-      reply.status(500).send({ 
-        error: 'Failed to fetch rates',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error fetching rates', error);
+      return errorResponse(
+        'Failed to fetch rates',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
     }
   });
 
   // GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/stock
-  fastify.get<{
-    Params: { idFournisseur: string; idHebergement: string };
-    Querystring: { debut: string; fin: string }
-  }>('/:idFournisseur/accommodations/:idHebergement/stock', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
-    const idHebergement = parseInt(request.params.idHebergement, 10);
-    const { debut, fin } = request.query;
+  router.get('/api/suppliers/:idFournisseur/accommodations/:idHebergement/stock', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const url = new URL(request.url);
+    const debut = url.searchParams.get('debut');
+    const fin = url.searchParams.get('fin');
     
     if (isNaN(idFournisseur) || isNaN(idHebergement)) {
-      return reply.status(400).send({ 
-        error: 'Invalid parameters',
-        message: 'idFournisseur and idHebergement must be numbers'
-      });
+      return errorResponse('Invalid parameters', 400);
     }
     
     if (!debut || !fin) {
-      return reply.status(400).send({ 
-        error: 'Missing required query parameters',
-        message: 'debut and fin are required (format: YYYY-MM-DD)'
-      });
+      return errorResponse('Missing required query parameters: debut and fin', 400);
     }
     
     try {
-      const stock = await loadStockForAccommodation(idFournisseur, idHebergement, debut, fin);
-      return stock;
+      const stock = await loadStockForAccommodation(idFournisseur, idHebergement, debut, fin, env);
+      return jsonResponse(stock);
     } catch (error) {
-      fastify.log.error({ error }, 'Error fetching stock');
-      reply.status(500).send({ 
-        error: 'Failed to fetch stock',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error fetching stock', error);
+      return errorResponse('Failed to fetch stock', 500);
     }
   });
 
   // GET /api/suppliers/:idFournisseur/rate-types
-  fastify.get<{
-    Params: { idFournisseur: string }
-  }>('/:idFournisseur/rate-types', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
+  router.get('/api/suppliers/:idFournisseur/rate-types', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
     if (isNaN(idFournisseur)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idFournisseur',
-        message: 'idFournisseur must be a number'
-      });
+      return errorResponse('Invalid idFournisseur', 400);
     }
     
     try {
-      // Charger les hébergements pour obtenir les types de tarifs liés
-      const accommodations = await getAccommodations(idFournisseur);
-      const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodations);
+      const accommodations = await getAccommodations(idFournisseur, env);
+      const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodations, env);
       const { rateTypeLabels, rateTypesList } = buildRateTypesList(discoveredRateTypes);
       
-      return {
+      return jsonResponse({
         rateTypeLabels,
         rateTypesList
-      };
-    } catch (error) {
-      fastify.log.error({ error }, 'Error fetching rate types');
-      reply.status(500).send({ 
-        error: 'Failed to fetch rate types',
-        message: error instanceof Error ? error.message : 'Unknown error'
       });
+    } catch (error) {
+      logger.error('Error fetching rate types', error);
+      return errorResponse('Failed to fetch rate types', 500);
     }
   });
 
   // GET /api/suppliers/:idFournisseur/supplier-data
-  fastify.get<{
-    Params: { idFournisseur: string };
-    Querystring: { debut: string; fin: string }
-  }>('/:idFournisseur/supplier-data', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
-    const { debut, fin } = request.query;
+  router.get('/api/suppliers/:idFournisseur/supplier-data', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const url = new URL(request.url);
+    const debut = url.searchParams.get('debut');
+    const fin = url.searchParams.get('fin');
     
     if (isNaN(idFournisseur)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idFournisseur',
-        message: 'idFournisseur must be a number'
-      });
+      return errorResponse('Invalid idFournisseur', 400);
     }
     
     if (!debut || !fin) {
-      return reply.status(400).send({ 
-        error: 'Missing required query parameters',
-        message: 'debut and fin are required (format: YYYY-MM-DD)'
-      });
+      return errorResponse('Missing required query parameters: debut and fin', 400);
     }
     
     try {
-      // Charger les hébergements
-      const accommodations = await getAccommodations(idFournisseur);
-      
-      // Charger toutes les données
+      const accommodations = await getAccommodations(idFournisseur, env);
       const startDate = new Date(debut + 'T00:00:00');
       const endDate = new Date(fin + 'T23:59:59');
       
-      const data = await getSupplierData(idFournisseur, accommodations, startDate, endDate);
-      return data;
+      const data = await getSupplierData(idFournisseur, accommodations, startDate, endDate, env);
+      return jsonResponse(data);
     } catch (error) {
-      fastify.log.error({ error }, 'Error fetching supplier data');
-      reply.status(500).send({ 
-        error: 'Failed to fetch supplier data',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error fetching supplier data', error);
+      return errorResponse('Failed to fetch supplier data', 500);
     }
   });
 
   // POST /api/suppliers/:idFournisseur/bulk-update
-  fastify.post<{
-    Params: { idFournisseur: string };
-    Body: BulkUpdateRequest;
-  }>('/:idFournisseur/bulk-update', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
-    const bulkData = request.body;
+  router.post('/api/suppliers/:idFournisseur/bulk-update', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
     if (isNaN(idFournisseur)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idFournisseur',
-        message: 'idFournisseur must be a number'
-      });
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    let bulkData: BulkUpdateRequest;
+    try {
+      bulkData = await request.json() as BulkUpdateRequest;
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
     }
     
     if (!bulkData || !Array.isArray(bulkData.accommodations)) {
-      return reply.status(400).send({ 
-        error: 'Invalid request body',
-        message: 'Request body must contain an accommodations array'
-      });
+      return errorResponse('Request body must contain an accommodations array', 400);
     }
     
     try {
-      fastify.log.info({ bulkData }, 'Received bulk update request');
+      logger.info('Received bulk update request', { accommodationsCount: bulkData.accommodations.length });
+      
+      const openProClient = getOpenProClient(env);
       
       // Traiter chaque hébergement
       for (const accommodation of bulkData.accommodations) {
-        fastify.log.info({ 
+        logger.info('Processing accommodation', {
           accommodationId: accommodation.idHebergement,
-          datesCount: accommodation.dates.length,
-          dates: accommodation.dates
-        }, 'Processing accommodation');
+          datesCount: accommodation.dates.length
+        });
         
-        // Transformer les modifications en format OpenPro
         const requeteTarif = transformBulkToOpenProFormat(accommodation);
         
-        fastify.log.info({ 
-          accommodationId: accommodation.idHebergement,
-          requeteTarif: requeteTarif,
-          hasTarifs: requeteTarif !== null && requeteTarif.tarifs.length > 0
-        }, 'Transformation result');
-        
         if (requeteTarif !== null && requeteTarif.tarifs.length > 0) {
-          fastify.log.info({ 
+          logger.info('Calling OpenPro API setRates', {
             accommodationId: accommodation.idHebergement,
-            tarifsCount: requeteTarif.tarifs.length,
-            tarifs: requeteTarif.tarifs
-          }, 'Calling OpenPro API setRates');
+            tarifsCount: requeteTarif.tarifs.length
+          });
           
-          // Appeler l'API OpenPro pour mettre à jour les tarifs
           await openProClient.setRates(
             idFournisseur,
             accommodation.idHebergement,
             requeteTarif
           );
           
-          fastify.log.info({ 
+          logger.info('Successfully called OpenPro API setRates', {
             accommodationId: accommodation.idHebergement
-          }, 'Successfully called OpenPro API setRates');
+          });
         } else {
-          fastify.log.warn({ 
-            accommodationId: accommodation.idHebergement,
-            requeteTarif: requeteTarif
-          }, 'Skipping accommodation: no valid tarifs to update');
+          logger.warn('Skipping accommodation: no valid tarifs to update', {
+            accommodationId: accommodation.idHebergement
+          });
         }
       }
       
-      return { success: true };
+      return jsonResponse({ success: true });
     } catch (error) {
-      fastify.log.error({ error, stack: error instanceof Error ? error.stack : undefined }, 'Error saving bulk updates');
-      reply.status(500).send({ 
-        error: 'Failed to save bulk updates',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error saving bulk updates', error);
+      return errorResponse(
+        'Failed to save bulk updates',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
     }
   });
 }
-

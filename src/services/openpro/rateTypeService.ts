@@ -5,7 +5,8 @@
  * les découvrir depuis les tarifs, et construire les structures finales de types.
  */
 
-import { openProClient } from '../openProClient.js';
+import { getOpenProClient } from '../openProClient.js';
+import type { Env } from '../../index.js';
 import type { Accommodation, RateType } from '../../types/api.js';
 import type { AccommodationRateTypeLink, AccommodationRateTypeLinksResponse, ApiRateType, ApiTarif, RateTypeListResponse } from '../../types/apiTypes.js';
 import { extractFrenchText } from './utils/rateUtils.js';
@@ -46,6 +47,7 @@ export type DiscoveredRateType = {
 export async function loadRateTypes(
   idFournisseur: number,
   accommodationsList: Accommodation[],
+  env: Env,
   signal?: AbortSignal
 ): Promise<Map<number, DiscoveredRateType>> {
   const discoveredRateTypes = new Map<number, DiscoveredRateType>();
@@ -55,6 +57,7 @@ export async function loadRateTypes(
   }
   
   try {
+    const openProClient = getOpenProClient(env);
     const allRateTypesResponse = await openProClient.listRateTypes(idFournisseur);
     if (signal?.aborted) throw new Error('Cancelled');
     const apiRateTypesResponse = allRateTypesResponse as unknown as RateTypeListResponse;

@@ -1,0 +1,14 @@
+# Fichier d'exemple pour les variables secrètes en développement local
+# Copiez ce fichier vers .dev.vars et remplissez les valeurs
+# Le fichier .dev.vars ne sera PAS commité (ajouté au .gitignore)
+
+# OpenPro API
+OPENPRO_API_KEY=test_fake_key
+
+# AI Providers (au moins l'un des deux)
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Optionnel: Cloudflare AI Gateway
+CLOUDFLARE_AI_GATEWAY_URL=
+

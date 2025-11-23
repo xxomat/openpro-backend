@@ -6,8 +6,9 @@
  */
 
 import type { BookingDisplay } from '../../types/api.js';
-import { openProClient } from '../openProClient.js';
+import { getOpenProClient } from '../openProClient.js';
 import type { Booking } from '../../../openpro-api-react/src/client/types.js';
+import type { Env } from '../../index.js';
 
 /**
  * Charge toutes les réservations pour un hébergement
@@ -21,6 +22,7 @@ import type { Booking } from '../../../openpro-api-react/src/client/types.js';
  * 
  * @param idFournisseur - Identifiant du fournisseur
  * @param idHebergement - Identifiant de l'hébergement
+ * @param env - Variables d'environnement Workers
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
  * @returns Tableau des réservations pour cet hébergement
  * @throws {Error} Peut lever une erreur si le chargement des réservations échoue
@@ -29,8 +31,10 @@ import type { Booking } from '../../../openpro-api-react/src/client/types.js';
 export async function loadBookingsForAccommodation(
   idFournisseur: number,
   idHebergement: number,
+  env: Env,
   signal?: AbortSignal
 ): Promise<BookingDisplay[]> {
+  const openProClient = getOpenProClient(env);
   // Charger toutes les réservations du fournisseur (pas de filtre par dates)
   const bookingList = await openProClient.listBookings(idFournisseur);
   if (signal?.aborted) throw new Error('Cancelled');
