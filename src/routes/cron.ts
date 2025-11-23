@@ -14,6 +14,7 @@ import {
 } from '../services/openpro/localBookingService.js';
 import { PlateformeReservation } from '../types/api.js';
 import { getOpenProClient } from '../services/openProClient.js';
+import { isStubMode } from '../services/openpro/stubSyncService.js';
 
 /**
  * Handler pour valider la synchronisation des réservations Direct
@@ -124,8 +125,17 @@ async function validateDirectBookingsSync(env: Env): Promise<{
           }
           
           if (plateforme === PlateformeReservation.Directe) {
+            const idDossier = booking.idDossier ?? 0;
+            // Log pour diagnostic si idDossier est manquant
+            if (!idDossier || idDossier === 0) {
+              console.warn(`[CRON] Direct booking without idDossier:`, {
+                reference: booking.reference,
+                idDossier: booking.idDossier,
+                bookingKeys: Object.keys(booking)
+              });
+            }
             openProBookings.push({
-              idDossier: booking.idDossier ?? 0,
+              idDossier: idDossier,
               idHebergement: booking.hebergement.idHebergement ?? 0,
               dateArrivee: booking.hebergement.dateArrivee,
               dateDepart: booking.hebergement.dateDepart,
@@ -150,6 +160,33 @@ async function validateDirectBookingsSync(env: Env): Promise<{
             obsolete: true
           });
           totalObsoleteCount++;
+          
+          // Log pour diagnostic
+          console.log(`[CRON] Found obsolete booking (no local bookings): idDossier=${openProBooking.idDossier}, ref=${openProBooking.reference}, isStubMode=${isStubMode(env)}`);
+          
+          // Supprimer la réservation obsolète du stub server uniquement si on est en mode stub
+          if (isStubMode(env)) {
+            // Vérifier que l'ID est valide avant de supprimer
+            if (openProBooking.idDossier && openProBooking.idDossier > 0) {
+              try {
+                console.log(`[CRON] Attempting to delete obsolete booking ${openProBooking.idDossier} (ref: ${openProBooking.reference}) from stub-server`);
+                const { deleteBookingFromStubById } = await import('../services/openpro/stubSyncService.js');
+                await deleteBookingFromStubById(
+                  openProBooking.idDossier,
+                  idFournisseur,
+                  env
+                );
+                console.log(`[CRON] Successfully deleted obsolete booking ${openProBooking.idDossier} from stub-server`);
+              } catch (deleteError) {
+                // Ne pas faire échouer le cron si la suppression échoue
+                console.error(`[CRON] Failed to delete obsolete booking ${openProBooking.idDossier} from stub-server:`, deleteError);
+              }
+            } else {
+              console.warn(`[CRON] Cannot delete obsolete booking: invalid idDossier (${openProBooking.idDossier})`);
+            }
+          } else {
+            console.log(`[CRON] Not in stub mode (OPENPRO_BASE_URL=${env.OPENPRO_BASE_URL}), skipping deletion`);
+          }
         }
         continue;
       }
@@ -214,6 +251,33 @@ async function validateDirectBookingsSync(env: Env): Promise<{
             obsolete: true
           });
           totalObsoleteCount++;
+          
+          // Log pour diagnostic
+          console.log(`[CRON] Found obsolete booking: idDossier=${openProBooking.idDossier}, ref=${openProBooking.reference}, isStubMode=${isStubMode(env)}`);
+          
+          // Supprimer la réservation obsolète du stub server uniquement si on est en mode stub
+          if (isStubMode(env)) {
+            // Vérifier que l'ID est valide avant de supprimer
+            if (openProBooking.idDossier && openProBooking.idDossier > 0) {
+              try {
+                console.log(`[CRON] Attempting to delete obsolete booking ${openProBooking.idDossier} (ref: ${openProBooking.reference}) from stub-server`);
+                const { deleteBookingFromStubById } = await import('../services/openpro/stubSyncService.js');
+                await deleteBookingFromStubById(
+                  openProBooking.idDossier,
+                  idFournisseur,
+                  env
+                );
+                console.log(`[CRON] Successfully deleted obsolete booking ${openProBooking.idDossier} from stub-server`);
+              } catch (deleteError) {
+                // Ne pas faire échouer le cron si la suppression échoue
+                console.error(`[CRON] Failed to delete obsolete booking ${openProBooking.idDossier} from stub-server:`, deleteError);
+              }
+            } else {
+              console.warn(`[CRON] Cannot delete obsolete booking: invalid idDossier (${openProBooking.idDossier})`);
+            }
+          } else {
+            console.log(`[CRON] Not in stub mode (OPENPRO_BASE_URL=${env.OPENPRO_BASE_URL}), skipping deletion`);
+          }
         }
       }
       

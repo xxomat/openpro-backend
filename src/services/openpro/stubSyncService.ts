@@ -12,7 +12,7 @@ import type { BookingDisplay } from '../../types/api.js';
 /**
  * Vérifie si on est en mode stub (localhost:3000)
  */
-function isStubMode(env: Env): boolean {
+export function isStubMode(env: Env): boolean {
   return env.OPENPRO_BASE_URL.includes('localhost:3000') || 
          env.OPENPRO_BASE_URL.includes('127.0.0.1:3000');
 }
@@ -143,6 +143,138 @@ export async function syncBookingToStub(
   } catch (error) {
     // Ne pas faire échouer la création de réservation si la sync échoue
     console.error('[STUB SYNC] Error syncing booking to stub-server:', error);
+  }
+}
+
+/**
+ * Supprime une réservation du stub-server directement par ID (plus simple et fiable)
+ * 
+ * @param idDossier - ID du dossier à supprimer
+ * @param idFournisseur - ID du fournisseur
+ * @param env - Variables d'environnement
+ */
+export async function deleteBookingFromStubById(
+  idDossier: number,
+  idFournisseur: number,
+  env: Env
+): Promise<void> {
+  // Ne rien faire si on n'est pas en mode stub
+  if (!isStubMode(env)) {
+    console.log(`[STUB SYNC] Not in stub mode, skipping deletion of booking ${idDossier}`);
+    return;
+  }
+  
+  if (!idDossier || idDossier <= 0) {
+    console.warn(`[STUB SYNC] Invalid idDossier (${idDossier}), skipping deletion`);
+    return;
+  }
+  
+  try {
+    const url = `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers/${idDossier}`;
+    console.log(`[STUB SYNC] Deleting booking ${idDossier} from stub-server at ${url}`);
+    
+    // Supprimer directement le dossier par ID
+    const deleteResponse = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `OsApiKey ${env.OPENPRO_API_KEY}`
+      }
+    });
+    
+    if (!deleteResponse.ok) {
+      const errorText = await deleteResponse.text();
+      console.error(`[STUB SYNC] Failed to delete booking ${idDossier} from stub-server: ${deleteResponse.status} ${errorText}`);
+      return;
+    }
+    
+    const result = await deleteResponse.json();
+    console.log(`[STUB SYNC] Successfully deleted booking ${idDossier} from stub-server`, result);
+  } catch (error) {
+    // Ne pas faire échouer la suppression si la sync stub échoue
+    console.error(`[STUB SYNC] Error deleting booking ${idDossier} from stub-server:`, error);
+    if (error instanceof Error) {
+      console.error(`[STUB SYNC] Error stack:`, error.stack);
+    }
+  }
+}
+
+/**
+ * Supprime une réservation du stub-server si on est en mode test
+ * 
+ * @param booking - Réservation à supprimer (LocalBookingRow avec les données)
+ * @param idFournisseur - ID du fournisseur
+ * @param env - Variables d'environnement
+ */
+export async function deleteBookingFromStub(
+  booking: { id: string; id_fournisseur: number; id_hebergement: number; date_arrivee: string; date_depart: string },
+  idFournisseur: number,
+  env: Env
+): Promise<void> {
+  // Ne rien faire si on n'est pas en mode stub
+  if (!isStubMode(env)) {
+    return;
+  }
+  
+  try {
+    // Trouver le dossier correspondant dans le stub-server par les critères
+    // (idFournisseur, idHebergement, dateArrivee, dateDepart)
+    const response = await fetch(
+      `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `OsApiKey ${env.OPENPRO_API_KEY}`
+        }
+      }
+    );
+    
+    if (!response.ok) {
+      console.error(`[STUB SYNC] Failed to fetch bookings from stub-server: ${response.status}`);
+      return;
+    }
+    
+    const result = await response.json();
+    // La réponse du stub server est: { ok: 1, data: { meta: {...}, dossiers: [...] } }
+    const bookings = result.data?.dossiers || result.data || [];
+    
+    // Trouver le dossier correspondant
+    const matchingDossier = bookings.find((d: any) => {
+      const hebergement = d.hebergement;
+      return hebergement &&
+             hebergement.idHebergement === booking.id_hebergement &&
+             hebergement.dateArrivee === booking.date_arrivee &&
+             hebergement.dateDepart === booking.date_depart;
+    });
+    
+    if (!matchingDossier) {
+      console.log(`[STUB SYNC] Booking not found in stub-server for deletion (may have already been deleted)`);
+      return;
+    }
+    
+    // Supprimer le dossier du stub-server
+    const deleteResponse = await fetch(
+      `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers/${matchingDossier.idDossier}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `OsApiKey ${env.OPENPRO_API_KEY}`
+        }
+      }
+    );
+    
+    if (!deleteResponse.ok) {
+      const errorText = await deleteResponse.text();
+      console.error(`[STUB SYNC] Failed to delete booking from stub-server: ${deleteResponse.status} ${errorText}`);
+      return;
+    }
+    
+    console.log(`[STUB SYNC] Successfully deleted booking ${matchingDossier.idDossier} from stub-server`);
+  } catch (error) {
+    // Ne pas faire échouer la suppression si la sync stub échoue
+    console.error('[STUB SYNC] Error deleting booking from stub-server:', error);
   }
 }
 

@@ -15,7 +15,7 @@ import { loadRateTypes, buildRateTypesList } from '../services/openpro/rateTypeS
 import { transformBulkToOpenProFormat, type BulkUpdateRequest } from '../services/openpro/bulkUpdateService.js';
 import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
-import { createLocalBooking } from '../services/openpro/localBookingService.js';
+import { createLocalBooking, deleteLocalBooking } from '../services/openpro/localBookingService.js';
 import { syncBookingToStub } from '../services/openpro/stubSyncService.js';
 
 /**
@@ -475,6 +475,69 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       logger.error('Error fetching sync status', error);
       return errorResponse(
         'Failed to fetch sync status',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // DELETE /api/suppliers/:idFournisseur/local-bookings/:idDossier
+  router.delete('/api/suppliers/:idFournisseur/local-bookings/:idDossier', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idDossier = parseInt(request.params!.idDossier, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    }
+    
+    if (isNaN(idDossier)) {
+      return errorResponse('Invalid idDossier: must be a number', 400);
+    }
+    
+    // Récupérer les paramètres optionnels de la query string pour une recherche plus précise
+    const url = new URL(request.url);
+    const idHebergementParam = url.searchParams.get('idHebergement');
+    const dateArriveeParam = url.searchParams.get('dateArrivee');
+    const dateDepartParam = url.searchParams.get('dateDepart');
+    
+    const idHebergement = idHebergementParam ? parseInt(idHebergementParam, 10) : undefined;
+    const dateArrivee = dateArriveeParam || undefined;
+    const dateDepart = dateDepartParam || undefined;
+    
+    try {
+      // Supprimer la réservation locale de la DB
+      // Passer les critères supplémentaires pour une recherche plus précise
+      const result = await deleteLocalBooking(
+        idFournisseur,
+        idDossier,
+        env,
+        idHebergement,
+        dateArrivee,
+        dateDepart
+      );
+      
+      if (!result.success || !result.deletedBooking) {
+        return errorResponse('Booking not found or could not be deleted', 404);
+      }
+      
+      const deletedBooking = result.deletedBooking;
+      
+      logger.info(`Deleted local booking ${idDossier} for supplier ${idFournisseur}`);
+      
+      // Supprimer également du stub-server si on est en mode test
+      try {
+        const { deleteBookingFromStub } = await import('../services/openpro/stubSyncService.js');
+        await deleteBookingFromStub(deletedBooking, idFournisseur, env);
+      } catch (syncError) {
+        // Ne pas faire échouer la suppression si la sync stub échoue
+        logger.warn('Failed to delete booking from stub-server (non-blocking):', syncError);
+      }
+      
+      return jsonResponse({ success: true });
+    } catch (error) {
+      logger.error('Error deleting local booking', error);
+      return errorResponse(
+        'Failed to delete local booking',
         500,
         error instanceof Error ? error.message : 'Unknown error'
       );

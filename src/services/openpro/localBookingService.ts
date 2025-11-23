@@ -248,8 +248,21 @@ function convertRowToBookingDisplay(row: LocalBookingRow): BookingDisplay {
   if (row.client_nom) clientNomParts.push(row.client_nom);
   const clientNom = clientNomParts.length > 0 ? clientNomParts.join(' ') : undefined;
 
+  // Utiliser l'ID interne de la DB comme idDossier pour identifier les réservations locales
+  // Convertir l'ID hexadécimal en nombre (premiers caractères) pour compatibilité avec idDossier
+  let idDossier = 0;
+  try {
+    // Utiliser une partie de l'ID hexadécimal comme identifiant numérique
+    // On prend les 8 premiers caractères hex et on les convertit en nombre
+    const hexPart = row.id.substring(0, 8);
+    idDossier = parseInt(hexPart, 16);
+  } catch {
+    // Si la conversion échoue, utiliser 0
+    idDossier = 0;
+  }
+
   return {
-    idDossier: 0, // Les réservations locales n'ont pas d'idDossier OpenPro
+    idDossier, // ID interne de la DB converti en nombre pour identifier les réservations locales
     idHebergement: row.id_hebergement,
     dateArrivee: row.date_arrivee,
     dateDepart: row.date_depart,
@@ -264,5 +277,140 @@ function convertRowToBookingDisplay(row: LocalBookingRow): BookingDisplay {
     isPendingSync: row.synced_at === null || row.synced_at === undefined,
     isObsolete: false // Les réservations dans la DB ne sont jamais obsolètes
   };
+}
+
+/**
+ * Trouve une réservation locale par son ID interne de la DB (converti depuis idDossier)
+ * 
+ * @param idFournisseur - Identifiant du fournisseur
+ * @param idDossier - ID de la réservation (idDossier converti depuis l'ID interne)
+ * @param env - Variables d'environnement Workers
+ * @returns La réservation locale trouvée ou null si non trouvée
+ */
+async function findLocalBookingByIdDossier(
+  idFournisseur: number,
+  idDossier: number,
+  env: Env
+): Promise<LocalBookingRow | null> {
+  // Pour les réservations locales, on utilise une approche hybride :
+  // On cherche toutes les réservations du fournisseur et on compare l'ID converti
+  const result = await env.DB.prepare(`
+    SELECT * FROM local_bookings
+    WHERE id_fournisseur = ?
+    ORDER BY date_creation DESC
+  `).bind(idFournisseur).all();
+
+  if (!result.results || result.results.length === 0) {
+    return null;
+  }
+
+  // Parcourir les résultats pour trouver celle dont l'ID converti correspond
+  // On essaie plusieurs méthodes de conversion pour être plus robuste
+  for (const row of result.results as LocalBookingRow[]) {
+    try {
+      // Méthode 1: 8 premiers caractères hex convertis en nombre
+      if (row.id.length >= 8) {
+        const hexPart = row.id.substring(0, 8);
+        const rowIdDossier = parseInt(hexPart, 16);
+        if (rowIdDossier === idDossier) {
+          return row;
+        }
+      }
+      
+      // Méthode 2: 8 caractères suivants (si la première méthode ne fonctionne pas)
+      if (row.id.length >= 16) {
+        const hexPart2 = row.id.substring(8, 16);
+        const rowIdDossier2 = parseInt(hexPart2, 16);
+        if (rowIdDossier2 === idDossier) {
+          return row;
+        }
+      }
+      
+      // Méthode 3: Hash simple basé sur la longueur et les caractères
+      const hashId = row.id.length * 1000 + row.id.charCodeAt(0) * 100 + 
+                     (row.id.length > 1 ? row.id.charCodeAt(row.id.length - 1) : 0);
+      if (hashId === idDossier) {
+        return row;
+      }
+    } catch {
+      // Ignorer les erreurs de conversion
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Trouve une réservation locale par une combinaison unique de critères
+ * 
+ * @param idFournisseur - Identifiant du fournisseur
+ * @param idHebergement - Identifiant de l'hébergement
+ * @param dateArrivee - Date d'arrivée (YYYY-MM-DD)
+ * @param dateDepart - Date de départ (YYYY-MM-DD)
+ * @param env - Variables d'environnement Workers
+ * @returns La réservation locale trouvée ou null si non trouvée
+ */
+async function findLocalBookingByCriteria(
+  idFournisseur: number,
+  idHebergement: number,
+  dateArrivee: string,
+  dateDepart: string,
+  env: Env
+): Promise<LocalBookingRow | null> {
+  const result = await env.DB.prepare(`
+    SELECT * FROM local_bookings
+    WHERE id_fournisseur = ? 
+      AND id_hebergement = ?
+      AND date_arrivee = ?
+      AND date_depart = ?
+    LIMIT 1
+  `).bind(idFournisseur, idHebergement, dateArrivee, dateDepart).first();
+
+  return (result as LocalBookingRow) || null;
+}
+
+/**
+ * Supprime une réservation locale de la DB
+ * 
+ * @param idFournisseur - Identifiant du fournisseur
+ * @param idDossier - ID de la réservation (idDossier converti depuis l'ID interne)
+ * @param idHebergement - Identifiant de l'hébergement (optionnel, pour une recherche plus précise)
+ * @param dateArrivee - Date d'arrivée (optionnel, pour une recherche plus précise)
+ * @param dateDepart - Date de départ (optionnel, pour une recherche plus précise)
+ * @param env - Variables d'environnement Workers
+ * @returns True si la réservation a été supprimée, false sinon
+ * @throws {Error} Si la suppression échoue
+ */
+export async function deleteLocalBooking(
+  idFournisseur: number,
+  idDossier: number,
+  env: Env,
+  idHebergement?: number,
+  dateArrivee?: string,
+  dateDepart?: string
+): Promise<{ success: boolean; deletedBooking: LocalBookingRow | null }> {
+  let booking: LocalBookingRow | null = null;
+
+  // Si on a les critères complets, utiliser la recherche par critères (plus fiable)
+  if (idHebergement !== undefined && dateArrivee && dateDepart) {
+    booking = await findLocalBookingByCriteria(idFournisseur, idHebergement, dateArrivee, dateDepart, env);
+  }
+  
+  // Sinon, essayer par ID converti
+  if (!booking) {
+    booking = await findLocalBookingByIdDossier(idFournisseur, idDossier, env);
+  }
+  
+  if (!booking) {
+    return { success: false, deletedBooking: null };
+  }
+
+  // Supprimer la réservation
+  await env.DB.prepare(`
+    DELETE FROM local_bookings
+    WHERE id = ?
+  `).bind(booking.id).run();
+
+  return { success: true, deletedBooking: booking };
 }
 
