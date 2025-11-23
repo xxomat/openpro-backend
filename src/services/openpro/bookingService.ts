@@ -55,61 +55,20 @@ export async function loadBookingsForAccommodation(
       continue;
     }
     
-    // Extraire toutes les informations du client
+    // Construire le nom du client
     let clientNom: string | undefined;
-    let clientCivilite: string | undefined;
-    let clientEmail: string | undefined;
-    let clientTelephone: string | undefined;
-    let clientRemarques: string | undefined;
-    let clientAdresse: string | undefined;
-    let clientCodePostal: string | undefined;
-    let clientVille: string | undefined;
-    let clientPays: string | undefined;
-    let clientDateNaissance: string | undefined;
-    let clientNationalite: string | undefined;
-    let clientProfession: string | undefined;
-    let clientSociete: string | undefined;
-    let clientSiret: string | undefined;
-    let clientTva: string | undefined;
-    let clientLangue: string | undefined;
-    let clientNewsletter: boolean | undefined;
-    let clientCgvAcceptees: boolean | undefined;
-    
     if (booking.client) {
       const parts: string[] = [];
       if (booking.client.prenom) parts.push(booking.client.prenom);
       if (booking.client.nom) parts.push(booking.client.nom);
       clientNom = parts.length > 0 ? parts.join(' ') : undefined;
-      clientCivilite = booking.client.civilite;
-      clientEmail = booking.client.email;
-      clientTelephone = booking.client.telephone;
-      clientRemarques = booking.client.remarques;
-      clientAdresse = booking.client.adresse;
-      clientCodePostal = booking.client.codePostal;
-      clientVille = booking.client.ville;
-      clientPays = booking.client.pays;
-      clientDateNaissance = booking.client.dateNaissance;
-      clientNationalite = booking.client.nationalite;
-      clientProfession = booking.client.profession;
-      clientSociete = booking.client.societe;
-      clientSiret = booking.client.siret;
-      clientTva = booking.client.tva;
-      clientLangue = booking.client.langue;
-      clientNewsletter = booking.client.newsletter;
-      clientCgvAcceptees = booking.client.cgvAcceptees;
     }
     
-    // Extraire le montant total et la devise
+    // Extraire le montant total
     const montantTotal = booking.paiement?.montantTotal;
-    const devise = booking.paiement?.devise;
     
-    // Extraire les informations de l'hébergement
+    // Extraire le nombre de personnes
     const nbPersonnes = booking.hebergement?.nbPersonnes;
-    const nbNuits = booking.hebergement?.nbNuits;
-    const typeTarifLibelle = booking.hebergement?.typeTarif?.libelle;
-    
-    // Extraire la date de création
-    const dateCreation = booking.dateCreation;
     
     bookings.push({
       idDossier: booking.idDossier ?? 0,
@@ -118,29 +77,8 @@ export async function loadBookingsForAccommodation(
       dateDepart: booking.hebergement.dateDepart,
       reference: booking.reference,
       clientNom,
-      clientCivilite,
-      clientEmail,
-      clientTelephone,
-      clientRemarques,
-      clientAdresse,
-      clientCodePostal,
-      clientVille,
-      clientPays,
-      clientDateNaissance,
-      clientNationalite,
-      clientProfession,
-      clientSociete,
-      clientSiret,
-      clientTva,
-      clientLangue,
-      clientNewsletter,
-      clientCgvAcceptees,
       montantTotal,
-      nbPersonnes,
-      nbNuits,
-      typeTarifLibelle,
-      devise,
-      dateCreation
+      nbPersonnes
     });
   }
   
