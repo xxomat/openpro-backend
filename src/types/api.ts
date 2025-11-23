@@ -25,7 +25,6 @@ export interface BookingDisplay {
   reference?: string;
   clientNom?: string;   // Nom du client (nom + prénom)
   montantTotal?: number; // Prix total de la réservation
-  nbPersonnes?: number; // Nombre de personnes
 }
 
 export interface SupplierData {
