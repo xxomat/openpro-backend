@@ -1,22 +1,22 @@
 /**
- * Client OpenPro API
+ * Client OpenPro API pour Workers
  * 
- * Ce fichier crée et exporte une instance unique du client OpenPro
- * configurée avec les credentials depuis les variables d'environnement.
+ * Ce fichier crée et exporte une fonction pour obtenir une instance du client OpenPro
+ * configurée avec les credentials depuis les variables d'environnement Workers.
  */
 
 import { createOpenProClient } from '../../openpro-api-react/src/client/index.js';
-import { config } from '../config/env.js';
+import type { Env } from '../index.js';
 
 /**
- * Instance unique du client OpenPro configurée avec le rôle 'admin'
+ * Crée une instance du client OpenPro avec les credentials de l'environnement
  * 
- * Cette instance est utilisée par tous les services pour communiquer
- * avec l'API OpenPro. L'API key est stockée côté serveur et n'est
- * jamais exposée au frontend.
+ * @param env - Variables d'environnement Workers
+ * @returns Instance du client OpenPro configurée
  */
-export const openProClient = createOpenProClient('admin', {
-  baseUrl: config.OPENPRO_BASE_URL,
-  apiKey: config.OPENPRO_API_KEY
-});
-
+export function getOpenProClient(env: Env) {
+  return createOpenProClient('admin', {
+    baseUrl: env.OPENPRO_BASE_URL,
+    apiKey: env.OPENPRO_API_KEY
+  });
+}

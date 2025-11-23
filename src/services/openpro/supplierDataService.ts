@@ -14,6 +14,9 @@ import { getAccommodations } from './accommodationService.js';
 import { loadStockForAccommodation } from './stockService.js';
 import { loadRateTypes, buildRateTypesList } from './rateTypeService.js';
 import { loadRatesForAccommodation } from './rateService.js';
+import { loadBookingsForAccommodation } from './bookingService.js';
+import { loadLocalBookingsForAccommodation } from './localBookingService.js';
+import type { Env } from '../../index.js';
 
 /**
  * Charge toutes les données (stock, tarifs, types de tarifs) pour un fournisseur
@@ -40,6 +43,7 @@ export async function getSupplierData(
   accommodationsList: Accommodation[],
   startDate: Date,
   endDate: Date,
+  env: Env,
   signal?: AbortSignal
 ): Promise<SupplierData> {
   const nextStock: Record<number, Record<string, number>> = {};
@@ -47,18 +51,19 @@ export async function getSupplierData(
   const nextPromo: Record<number, Record<string, boolean>> = {};
   const nextRateTypes: Record<number, Record<string, string[]>> = {};
   const nextDureeMin: Record<number, Record<string, number | null>> = {};
+  const nextBookings: Record<number, import('../../types/api.js').BookingDisplay[]> = {};
   const debut = formatDate(startDate);
   const fin = formatDate(endDate);
   
   // Charger les types de tarifs disponibles
-  const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodationsList, signal);
+  const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodationsList, env, signal);
   
   // Charger les données pour chaque hébergement
   for (const acc of accommodationsList) {
     if (signal?.aborted) throw new Error('Cancelled');
     
     // Charger le stock
-    const mapStock = await loadStockForAccommodation(idFournisseur, acc.idHebergement, debut, fin, signal);
+    const mapStock = await loadStockForAccommodation(idFournisseur, acc.idHebergement, debut, fin, env, signal);
     nextStock[acc.idHebergement] = mapStock;
 
     // Charger les tarifs, promotions, types et durées minimales
@@ -69,6 +74,7 @@ export async function getSupplierData(
         debut,
         fin,
         discoveredRateTypes,
+        env,
         signal
       );
       
@@ -78,6 +84,29 @@ export async function getSupplierData(
       nextDureeMin[acc.idHebergement] = ratesData.dureeMin;
     } catch {
       // Ignorer les erreurs de tarifs pour l'instant
+    }
+
+    // Charger les réservations (toutes les réservations, pas de filtre par dates)
+    try {
+      // Charger les réservations locales pour cet hébergement
+      const localBookings = await loadLocalBookingsForAccommodation(
+        idFournisseur,
+        acc.idHebergement,
+        env
+      );
+      
+      // Charger les réservations OpenPro et fusionner avec les locales
+      const bookings = await loadBookingsForAccommodation(
+        idFournisseur,
+        acc.idHebergement,
+        env,
+        signal,
+        localBookings
+      );
+      nextBookings[acc.idHebergement] = bookings;
+    } catch {
+      // Ignorer les erreurs de réservations pour l'instant
+      nextBookings[acc.idHebergement] = [];
     }
   }
   
@@ -91,7 +120,8 @@ export async function getSupplierData(
     rateTypes: nextRateTypes,
     dureeMin: nextDureeMin,
     rateTypeLabels,
-    rateTypesList
+    rateTypesList,
+    bookings: nextBookings
   };
 }
 

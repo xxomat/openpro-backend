@@ -1,15 +1,16 @@
 /**
  * Routes pour les webhooks OpenPro
  * 
- * Ce fichier contient les routes pour recevoir les webhooks de l'API OpenPro,
- * notamment les notifications de nouvelles réservations qui déclenchent
- * l'analyse IA pour générer des suggestions.
+ * Adaptées pour Cloudflare Workers avec itty-router
  */
 
-import type { FastifyInstance } from 'fastify';
-import { openProClient } from '../services/openProClient.js';
+import type { IRequest, Router } from 'itty-router';
+import type { Env, RequestContext } from '../index.js';
+import { jsonResponse, errorResponse } from '../utils/cors.js';
+import { getOpenProClient } from '../services/openProClient.js';
 import { generatePricingSuggestions } from '../services/ai/suggestionEngine.js';
 import { saveSuggestions } from '../services/ai/suggestionStorage.js';
+import { createLogger } from '../index.js';
 import type { BookingAnalysis } from '../types/suggestions.js';
 
 /**
@@ -62,24 +63,25 @@ function normalizeStock(stock: unknown): Record<string, number> {
 
 /**
  * Charge les réservations récentes pour un hébergement
- * 
- * TODO: Implémenter le chargement depuis une base de données
  */
-async function loadRecentBookings(idFournisseur: number, idHebergement: number): Promise<BookingAnalysis[]> {
-  // Pour l'instant, retourner un tableau vide
-  // En production, charger depuis une base de données
+async function loadRecentBookings(
+  idFournisseur: number,
+  idHebergement: number,
+  env: Env
+): Promise<BookingAnalysis[]> {
+  // TODO: Charger depuis D1 les réservations locales + OpenPro
   return [];
 }
 
 /**
  * Enregistre les routes des webhooks
- * 
- * @param fastify - Instance Fastify
  */
-export async function webhooksRoutes(fastify: FastifyInstance) {
+export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
+  const logger = createLogger(ctx);
+  
   // POST /api/webhooks/openpro/booking
-  fastify.post<{
-    Body: {
+  router.post('/api/webhooks/openpro/booking', async (request: IRequest) => {
+    let booking: {
       evenement?: string;
       idDossier: number;
       idFournisseur: number;
@@ -87,14 +89,17 @@ export async function webhooksRoutes(fastify: FastifyInstance) {
       dateArrivee: string;
       dateDepart: string;
       montant: number;
-    }
-  }>('/openpro/booking', async (request, reply) => {
-    const booking = request.body;
-    
-    fastify.log.info(`Webhook reçu: nouvelle réservation ${booking.idDossier}`);
+    };
     
     try {
-      // Calculer la plage de dates pour charger les données contextuelles (90 jours)
+      booking = await request.json();
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
+    }
+    
+    logger.info(`Webhook reçu: nouvelle réservation ${booking.idDossier}`);
+    
+    try {
       const today = new Date();
       const endDate = new Date(today);
       endDate.setDate(endDate.getDate() + 90);
@@ -102,11 +107,13 @@ export async function webhooksRoutes(fastify: FastifyInstance) {
       const debut = today.toISOString().split('T')[0];
       const fin = endDate.toISOString().split('T')[0];
       
+      const openProClient = getOpenProClient(env);
+      
       // Charger les données contextuelles en parallèle
       const [rates, stock, recentBookings] = await Promise.all([
         openProClient.getRates(booking.idFournisseur, booking.idHebergement, { debut, fin }),
         openProClient.getStock(booking.idFournisseur, booking.idHebergement, { debut, fin }),
-        loadRecentBookings(booking.idFournisseur, booking.idHebergement)
+        loadRecentBookings(booking.idFournisseur, booking.idHebergement, env)
       ]);
       
       // Préparer les données pour l'analyse
@@ -130,25 +137,28 @@ export async function webhooksRoutes(fastify: FastifyInstance) {
       };
       
       // Générer les suggestions via IA (asynchrone, ne bloque pas le webhook)
-      generatePricingSuggestions(analysisRequest)
+      // Utiliser waitUntil pour continuer l'exécution après la réponse
+      generatePricingSuggestions(analysisRequest, env)
         .then(suggestions => {
-          saveSuggestions(suggestions);
-          fastify.log.info(`${suggestions.length} suggestions générées pour hébergement ${booking.idHebergement}`);
+          return saveSuggestions(suggestions, env);
+        })
+        .then(() => {
+          logger.info(`Suggestions générées pour hébergement ${booking.idHebergement}`);
         })
         .catch(err => {
-          fastify.log.error('Erreur génération suggestions:', err);
+          logger.error('Erreur génération suggestions', err);
         });
       
       // Réponse rapide au webhook
-      return { received: true, message: 'Analyse en cours' };
+      return jsonResponse({ received: true, message: 'Analyse en cours' });
       
     } catch (error) {
-      fastify.log.error('Erreur traitement webhook:', error);
-      reply.status(500).send({ 
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Erreur traitement webhook', error);
+      return errorResponse(
+        'Internal server error',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
     }
   });
 }
-

@@ -1,18 +1,17 @@
 /**
  * Routes pour les suggestions IA
  * 
- * Ce fichier contient les routes API REST pour gérer les suggestions
- * générées par l'IA pour les ajustements de tarifs et durées minimales.
+ * Adaptées pour Cloudflare Workers avec itty-router
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { IRequest, Router } from 'itty-router';
+import type { Env, RequestContext } from '../index.js';
+import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { getSuggestionsBySupplier, updateSuggestionStatus } from '../services/ai/suggestionStorage.js';
 import { generatePricingSuggestions } from '../services/ai/suggestionEngine.js';
 import { saveSuggestions } from '../services/ai/suggestionStorage.js';
-import { openProClient } from '../services/openProClient.js';
-import { getAccommodations } from '../services/openpro/accommodationService.js';
-import { loadRatesForAccommodation } from '../services/openpro/rateService.js';
-import { loadStockForAccommodation } from '../services/openpro/stockService.js';
+import { getOpenProClient } from '../services/openProClient.js';
+import { createLogger } from '../index.js';
 
 /**
  * Normalise les données de tarifs depuis l'API vers un format simplifié
@@ -64,99 +63,90 @@ function normalizeStock(stock: unknown): Record<string, number> {
 
 /**
  * Enregistre les routes des suggestions
- * 
- * @param fastify - Instance Fastify
  */
-export async function suggestionsRoutes(fastify: FastifyInstance) {
-  // GET /api/suggestions/:idFournisseur
-  fastify.get<{
-    Params: { idFournisseur: string };
-    Querystring: { status?: 'pending' | 'applied' | 'rejected' }
-  }>('/:idFournisseur', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
-    const { status } = request.query;
+export function suggestionsRouter(router: Router, env: Env, ctx: RequestContext) {
+  const logger = createLogger(ctx);
+  
+  // GET /ai/suggestions/:idFournisseur
+  router.get('/ai/suggestions/:idFournisseur', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const url = new URL(request.url);
+    const status = url.searchParams.get('status') as 'pending' | 'applied' | 'rejected' | null;
     
     if (isNaN(idFournisseur)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idFournisseur',
-        message: 'idFournisseur must be a number'
-      });
+      return errorResponse('Invalid idFournisseur: must be a number', 400);
     }
     
     try {
-      const suggestions = await getSuggestionsBySupplier(idFournisseur, status);
-      return { suggestions };
+      const suggestions = await getSuggestionsBySupplier(idFournisseur, status || undefined, env);
+      return jsonResponse({ suggestions });
     } catch (error) {
-      fastify.log.error('Error fetching suggestions:', error);
-      reply.status(500).send({ 
-        error: 'Failed to fetch suggestions',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error fetching suggestions', error);
+      return errorResponse('Failed to fetch suggestions', 500);
     }
   });
   
-  // PATCH /api/suggestions/:id
-  fastify.patch<{
-    Params: { id: string };
-    Body: { status: 'applied' | 'rejected' }
-  }>('/:id', async (request, reply) => {
-    const { id } = request.params;
-    const { status } = request.body;
+  // PATCH /ai/suggestions/:id
+  router.patch('/ai/suggestions/:id', async (request: IRequest) => {
+    const { id } = request.params!;
+    
+    let body: { status: 'applied' | 'rejected' };
+    try {
+      body = await request.json();
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
+    }
+    
+    const { status } = body;
     
     if (!status || (status !== 'applied' && status !== 'rejected')) {
-      return reply.status(400).send({ 
-        error: 'Invalid status',
-        message: 'status must be "applied" or "rejected"'
-      });
+      return errorResponse('status must be "applied" or "rejected"', 400);
     }
     
     try {
-      const updated = await updateSuggestionStatus(id, status);
+      const updated = await updateSuggestionStatus(id, status, env);
       
       if (!updated) {
-        return reply.status(404).send({ error: 'Suggestion not found' });
+        return errorResponse('Suggestion not found', 404);
       }
       
-      return { success: true, suggestion: updated };
+      return jsonResponse({ success: true, suggestion: updated });
     } catch (error) {
-      fastify.log.error('Error updating suggestion:', error);
-      reply.status(500).send({ 
-        error: 'Failed to update suggestion',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      logger.error('Error updating suggestion', error);
+      return errorResponse('Failed to update suggestion', 500);
     }
   });
   
-  // POST /api/suggestions/:idFournisseur/generate
-  fastify.post<{
-    Params: { idFournisseur: string };
-    Body: { idHebergement: number }
-  }>('/:idFournisseur/generate', async (request, reply) => {
-    const idFournisseur = parseInt(request.params.idFournisseur, 10);
-    const { idHebergement } = request.body;
+  // POST /ai/suggestions/:idFournisseur/generate
+  router.post('/ai/suggestions/:idFournisseur/generate', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    
+    let body: { idHebergement: number };
+    try {
+      body = await request.json();
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
+    }
+    
+    const { idHebergement } = body;
     
     if (isNaN(idFournisseur)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idFournisseur',
-        message: 'idFournisseur must be a number'
-      });
+      return errorResponse('Invalid idFournisseur: must be a number', 400);
     }
     
     if (!idHebergement || isNaN(idHebergement)) {
-      return reply.status(400).send({ 
-        error: 'Invalid idHebergement',
-        message: 'idHebergement must be a number'
-      });
+      return errorResponse('Invalid idHebergement: must be a number', 400);
     }
     
     try {
-      // Calculer la plage de dates (90 jours)
       const today = new Date();
       const endDate = new Date(today);
       endDate.setDate(endDate.getDate() + 90);
       
       const debut = today.toISOString().split('T')[0];
       const fin = endDate.toISOString().split('T')[0];
+      
+      const openProClient = getOpenProClient(env);
       
       // Charger les données contextuelles
       const [rates, stock] = await Promise.all([
@@ -168,26 +158,22 @@ export async function suggestionsRoutes(fastify: FastifyInstance) {
       const analysisRequest = {
         idFournisseur,
         idHebergement,
-        recentBookings: [], // Pour l'analyse manuelle, pas de réservations récentes
+        recentBookings: [],
         currentRates: normalizeRates(rates),
         currentStock: normalizeStock(stock),
       };
       
       // Générer les suggestions
-      const suggestions = await generatePricingSuggestions(analysisRequest);
-      await saveSuggestions(suggestions);
+      const suggestions = await generatePricingSuggestions(analysisRequest, env);
+      await saveSuggestions(suggestions, env);
       
-      return { 
+      return jsonResponse({ 
         message: 'Analyse terminée',
         suggestionsCount: suggestions.length
-      };
-    } catch (error) {
-      fastify.log.error('Error generating suggestions:', error);
-      reply.status(500).send({ 
-        error: 'Failed to generate suggestions',
-        message: error instanceof Error ? error.message : 'Unknown error'
       });
+    } catch (error) {
+      logger.error('Error generating suggestions', error);
+      return errorResponse('Failed to generate suggestions', 500);
     }
   });
 }
-

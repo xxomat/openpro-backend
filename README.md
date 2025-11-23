@@ -1,202 +1,202 @@
-# OpenPro.Backend
+# OpenPro Backend - Cloudflare Workers
 
-Backend API Node.js/TypeScript pour l'application OpenPro.Admin. Gère tous les appels à l'API OpenPro et expose une API REST simplifiée pour le frontend.
+Backend API pour OpenPro.Admin, déployé sur Cloudflare Workers avec D1 (SQLite) pour la persistance.
 
-## Stack
+## 🚀 Stack Technique
 
-- **Fastify** - Framework web Node.js
-- **TypeScript** - Langage de programmation
-- **Vercel AI SDK** - SDK pour l'intégration IA (OpenAI, Anthropic)
-- **Zod** - Validation de schémas
-- **openpro-api-react** - Sous-module Git pour le client API OpenPro
+- **Runtime**: Cloudflare Workers (V8 isolates, edge computing)
+- **Base de données**: Cloudflare D1 (SQLite serverless)
+- **Router**: itty-router (léger et performant)
+- **IA**: Vercel AI SDK (OpenAI ou Anthropic)
+- **Language**: TypeScript
 
-## Prérequis
-
-- Node.js LTS (v20 ou supérieur)
-- npm
-- Sous-module Git `openpro-api-react` initialisé
-
-## Installation
-
-### 1. Cloner le dépôt et initialiser le sous-module
-
-```bash
-git clone https://github.com/xxomat/openpro-backend.git
-cd openpro-backend
-git submodule update --init --recursive
-```
-
-### 2. Installer les dépendances
+## 📦 Installation
 
 ```bash
 npm install
 ```
 
-### 3. Configurer les variables d'environnement
+## 🔧 Configuration
 
-Copier `.env.example` vers `.env` :
+### 1. Variables d'environnement locales
+
+Créez un fichier `.dev.vars` à partir de l'exemple :
 
 ```bash
-cp .env.example .env
+cp .dev.vars.example .dev.vars
 ```
 
-Modifier `.env` avec vos valeurs :
+Puis remplissez les valeurs :
 
-```ini
-# Port du serveur backend
-PORT=3001
+```env
+# OpenPro API
+OPENPRO_API_KEY=your_openpro_api_key_here
 
-# API OpenPro (utiliser stub en dev, prod en production)
-OPENPRO_BASE_URL=http://localhost:3000
-OPENPRO_API_KEY=fake-key-for-testing
+# AI Providers (au moins l'un des deux)
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
-# Frontend URL (pour CORS)
-FRONTEND_URL=http://localhost:4321
-
-# AI Provider
-AI_PROVIDER=openai
-OPENAI_API_KEY=sk-...
+# Optionnel: Cloudflare AI Gateway
+CLOUDFLARE_AI_GATEWAY_URL=
 ```
 
-## Développement
+### 2. Base de données D1
 
-### Workflow complet (3 terminaux)
+**En développement local** : La base D1 est créée et initialisée automatiquement au premier `npm run dev`. Aucune action manuelle requise !
 
-**Terminal 1 : Stub server**
+**Pour la production** : Créez la base de données D1 :
+
 ```bash
-cd ../openpro-api-react
-npm run stub
+npm run d1:create
 ```
-Le stub écoute sur http://localhost:3000
 
-**Terminal 2 : Backend**
+Notez le `database_id` retourné et mettez-le à jour dans `wrangler.toml` :
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "openpro-db"
+database_id = "YOUR_DATABASE_ID_HERE"
+```
+
+Ensuite, appliquez le schéma :
+
 ```bash
-cd OpenPro.Backend
+npm run d1:migrate
+```
+
+## 🏃 Développement Local
+
+```bash
+# Démarrer le serveur de développement
 npm run dev
-```
-Le backend écoute sur http://localhost:3001
 
-**Terminal 3 : Frontend**
+# Le serveur démarrera sur http://localhost:8787
+```
+
+Le mode développement utilise :
+- `.dev.vars` pour les secrets
+- D1 en mode local (base SQLite créée automatiquement dans `.wrangler/state/`)
+- Schéma appliqué automatiquement si la base n'existe pas
+- Logs console pour le debugging
+
+## 🚢 Déploiement
+
+### 1. Configurer les secrets en production
+
 ```bash
-cd ../OpenPro.Admin
-npm run dev
-```
-Le frontend écoute sur http://localhost:4321
-
-### Scripts disponibles
-
-- `npm run dev` - Démarre le serveur en mode développement avec hot-reload
-- `npm run dev:with-stub` - Vérifie que le stub server tourne avant de démarrer
-- `npm run build` - Compile TypeScript vers JavaScript
-- `npm start` - Démarre le serveur en production depuis `dist/`
-
-## Structure du projet
-
-```
-OpenPro.Backend/
-├── src/
-│   ├── index.ts                 # Point d'entrée Fastify
-│   ├── config/                  # Configuration
-│   ├── types/                   # Types TypeScript
-│   ├── services/                 # Services métier
-│   │   ├── openpro/            # Services OpenPro
-│   │   └── ai/                 # Services IA
-│   ├── routes/                  # Routes Fastify
-│   └── utils/                   # Utilitaires
-├── openpro-api-react/           # Sous-module Git
-├── docs/                        # Documentation
-└── package.json
+wrangler secret put OPENPRO_API_KEY
+wrangler secret put OPENAI_API_KEY
+# ou
+wrangler secret put ANTHROPIC_API_KEY
 ```
 
-## Endpoints API
+### 2. Déployer
 
-### Fournisseurs
+```bash
+npm run deploy
+```
+
+### 3. Appliquer le schéma D1 en production
+
+```bash
+npm run d1:migrate
+```
+
+## 📋 API Endpoints
+
+### Fournisseurs (Suppliers)
 
 - `GET /api/suppliers/:idFournisseur/accommodations` - Liste des hébergements
 - `GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/rates` - Tarifs
 - `GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/stock` - Stock
 - `GET /api/suppliers/:idFournisseur/rate-types` - Types de tarifs
-- `GET /api/suppliers/:idFournisseur/supplier-data` - Toutes les données
+- `GET /api/suppliers/:idFournisseur/supplier-data` - Données complètes
+- `POST /api/suppliers/:idFournisseur/bulk-update` - Mise à jour en masse
 
 ### Webhooks
 
-- `POST /api/webhooks/openpro/booking` - Réception des webhooks OpenPro
+- `POST /api/webhooks/openpro/booking` - Webhook réservation OpenPro
 
 ### Suggestions IA
 
-- `GET /api/suggestions/:idFournisseur` - Liste des suggestions
-- `PATCH /api/suggestions/:id` - Mettre à jour le statut d'une suggestion
-- `POST /api/suggestions/:idFournisseur/generate` - Générer des suggestions
+- `GET /ai/suggestions/:idFournisseur` - Liste des suggestions
+- `PATCH /ai/suggestions/:id` - Mettre à jour une suggestion
+- `POST /ai/suggestions/:idFournisseur/generate` - Générer des suggestions
 
-### Health check
+### Health Check
 
-- `GET /health` - Vérification de l'état du serveur
+- `GET /health` - Statut du service
 
-## Configuration
+## 🔍 Monitoring
 
-### Variables d'environnement
+### En développement local
 
-Voir `.env.example` pour la liste complète des variables.
+Les logs sont affichés directement dans la console avec `wrangler dev`.
 
-**Variables requises :**
-- `OPENPRO_BASE_URL` - URL de l'API OpenPro (stub en dev: http://localhost:3000)
-- `OPENPRO_API_KEY` - Clé API OpenPro
+### En production
 
-**Variables optionnelles :**
-- `PORT` - Port du serveur (défaut: 3001)
-- `FRONTEND_URL` - URL du frontend pour CORS (défaut: http://localhost:4321)
-- `AI_PROVIDER` - Provider IA (openai ou anthropic, défaut: openai)
-- `CLOUDFLARE_AI_GATEWAY_URL` - URL optionnelle du Cloudflare AI Gateway
+Utilisez le dashboard Cloudflare :
 
-## Service de suggestions IA
+1. **Workers Logs** : Logs en temps réel et historique
+2. **Workers Analytics** : Métriques de performance (requêtes, latence, erreurs)
+3. **D1 Metrics** : Métriques de la base de données
 
-Le backend inclut un service de suggestions utilisant le Vercel AI SDK pour analyser les réservations et générer des suggestions d'ajustements de tarifs.
+## 🗃️ Base de données D1
 
-**Déclenchement automatique :**
-- Lors de la réception d'un webhook de nouvelle réservation
+### Tables principales
 
-**Déclenchement manuel :**
-- Via `POST /api/suggestions/:idFournisseur/generate`
+- `local_bookings` : Réservations créées via l'interface admin
+- `ai_suggestions` : Suggestions générées par l'IA
 
-## Production
-
-### Build
+### Commandes utiles
 
 ```bash
-npm run build
+# Exécuter une requête SQL en local
+wrangler d1 execute openpro-db --local --command="SELECT * FROM local_bookings LIMIT 10"
+
+# Exécuter une requête SQL en production
+wrangler d1 execute openpro-db --command="SELECT * FROM local_bookings LIMIT 10"
+
+# Backup de la base de données
+wrangler d1 export openpro-db --output=backup.sql
 ```
 
-### Démarrage
+## 🔄 Migration depuis Fastify
 
-```bash
-npm start
-```
+Cette version a migré de Node.js/Fastify vers Cloudflare Workers. Principaux changements :
 
-### Variables d'environnement
+### ✅ Conservé
 
-S'assurer que toutes les variables d'environnement sont configurées dans l'environnement de production :
+- Logique métier des routes
+- Client OpenPro API
+- Vercel AI SDK pour les suggestions
+- Structure des données
 
-```ini
-OPENPRO_BASE_URL=https://api.open-pro.fr/tarif/multi/v1
-OPENPRO_API_KEY=votre_vraie_cle_api
-```
+### ⚠️ Modifié
 
-## Tests
+- Runtime : Node.js → Cloudflare Workers
+- Framework : Fastify → itty-router
+- Stockage : En mémoire → D1 (SQLite)
+- Config : dotenv → wrangler.toml + secrets
+- Monitoring : Dashboard custom → Cloudflare Dashboard
 
-Le backend utilise le stub server pour les tests en développement. Assurer que le stub tourne :
+### ❌ Supprimé
 
-```bash
-npm run dev:with-stub
-```
+- Dashboard React custom pour monitoring
+- `AsyncLocalStorage` pour le contexte de requête
+- Stockage en mémoire (Map/Array)
 
-## Documentation
+## 📚 Ressources
 
-- **PRD** : `docs/PRD.md`
-- **Règles de codage** : `.cursor/rules/openpro-backend.md`
+- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
+- [Cloudflare D1 Documentation](https://developers.cloudflare.com/d1/)
+- [itty-router Documentation](https://itty.dev/)
+- [Vercel AI SDK Documentation](https://sdk.vercel.ai/)
 
-## Références
+## 🤝 Support
 
-- [Documentation API Open Pro](https://documentation.open-system.fr/api-openpro/tarif/multi/v1/)
-- [Vercel AI SDK](https://ai-sdk.dev/)
-- [Fastify](https://www.fastify.io/)
-- [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/)
+Pour toute question ou problème, consultez :
+- Le fichier `docs/PRD.md` pour la documentation fonctionnelle
+- Le fichier `SETUP.md` pour l'installation détaillée
+- Les logs Cloudflare Workers en production

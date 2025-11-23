@@ -15,8 +15,9 @@ import { suggestionsRoutes } from './suggestions.js';
  * @param fastify - Instance Fastify
  */
 export async function registerRoutes(fastify: FastifyInstance) {
+  // API routes
   await fastify.register(suppliersRoutes, { prefix: '/api/suppliers' });
   await fastify.register(webhooksRoutes, { prefix: '/api/webhooks' });
-  await fastify.register(suggestionsRoutes, { prefix: '/api/suggestions' });
+  await fastify.register(suggestionsRoutes, { prefix: '/ai/suggestions' });
 }
 

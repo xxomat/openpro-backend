@@ -6,7 +6,8 @@
  * traitement individuel de chaque tarif.
  */
 
-import { openProClient } from '../openProClient.js';
+import { getOpenProClient } from '../openProClient.js';
+import type { Env } from '../../index.js';
 import type { ApiTarif, RatesResponse } from '../../types/apiTypes.js';
 import type { DiscoveredRateType } from './rateTypeService.js';
 import { formatDate } from '../../utils/dateUtils.js';
@@ -149,6 +150,7 @@ export async function loadRatesForAccommodation(
   debut: string,
   fin: string,
   discoveredRateTypes: Map<number, DiscoveredRateType>,
+  env: Env,
   signal?: AbortSignal
 ): Promise<{
   rates: Record<string, Record<number, number>>;
@@ -156,6 +158,7 @@ export async function loadRatesForAccommodation(
   rateTypes: Record<string, string[]>;
   dureeMin: Record<string, number | null>;
 }> {
+  const openProClient = getOpenProClient(env);
   const rates = await openProClient.getRates(idFournisseur, idHebergement, { debut, fin });
   if (signal?.aborted) throw new Error('Cancelled');
   

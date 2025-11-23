@@ -6,26 +6,46 @@
  * des ajustements de tarifs et durées minimales.
  */
 
-import { generateObject } from 'ai';
+import { generateObject as aiGenerateObject } from 'ai';
 import { z } from 'zod';
 import { getAIModel } from '../../config/ai.js';
 import type { SuggestionRequest, PricingSuggestion } from '../../types/suggestions.js';
 import { generateAnalysisPrompt } from './analysisPrompts.js';
+import type { Env } from '../../index.js';
+
+/**
+ * Type pour une suggestion individuelle depuis l'IA
+ */
+interface AISuggestionItem {
+  type: 'rate_increase' | 'rate_decrease' | 'min_stay_increase' | 'min_stay_decrease';
+  idTypeTarif?: number;
+  dateDebut: string;
+  dateFin: string;
+  currentValue: number;
+  suggestedValue: number;
+  confidence: number;
+  reasoning: string;
+}
+
+/**
+ * Schéma Zod pour une suggestion individuelle
+ */
+const suggestionItemSchema = z.object({
+  type: z.enum(['rate_increase', 'rate_decrease', 'min_stay_increase', 'min_stay_decrease']),
+  idTypeTarif: z.number().optional(),
+  dateDebut: z.string(),
+  dateFin: z.string(),
+  currentValue: z.number(),
+  suggestedValue: z.number(),
+  confidence: z.number().min(0).max(1),
+  reasoning: z.string(),
+}) as z.ZodType<AISuggestionItem>;
 
 /**
  * Schéma Zod pour valider la réponse de l'IA
  */
 const suggestionSchema = z.object({
-  suggestions: z.array(z.object({
-    type: z.enum(['rate_increase', 'rate_decrease', 'min_stay_increase', 'min_stay_decrease']),
-    idTypeTarif: z.number().optional(),
-    dateDebut: z.string(),
-    dateFin: z.string(),
-    currentValue: z.number(),
-    suggestedValue: z.number(),
-    confidence: z.number().min(0).max(1),
-    reasoning: z.string(),
-  }))
+  suggestions: z.array(suggestionItemSchema)
 });
 
 /**
@@ -40,26 +60,78 @@ const suggestionSchema = z.object({
  * @throws {Error} Peut lever une erreur si la génération échoue
  */
 export async function generatePricingSuggestions(
-  request: SuggestionRequest
+  request: SuggestionRequest,
+  env: Env
 ): Promise<PricingSuggestion[]> {
-  const model = getAIModel();
+  const model = getAIModel(env);
   const prompt = generateAnalysisPrompt(request);
+  const traceId = crypto.randomUUID();
+  const startTime = Date.now();
   
-  const { object } = await generateObject({
-    model,
-    schema: suggestionSchema,
-    prompt,
-    temperature: 0.7,
-  });
+  // Déterminer le provider et le model name
+  const provider = env.AI_PROVIDER || 'openai';
+  const modelName = typeof model === 'string' ? model : 'unknown';
+  
+  try {
+    // Utiliser any pour contourner le problème d'inférence de types complexes du SDK AI
+    // @ts-ignore - Type instantiation depth issue avec generateObject
+    const result = await aiGenerateObject({
+      model,
+      schema: suggestionSchema,
+      prompt,
+      temperature: 0.7,
+    });
 
-  // Transformer en PricingSuggestion avec IDs
-  return object.suggestions.map((s, index) => ({
-    id: `suggestion-${Date.now()}-${index}`,
-    ...s,
-    idFournisseur: request.idFournisseur,
-    idHebergement: request.idHebergement,
-    createdAt: new Date(),
-    status: 'pending' as const,
-  }));
+    const duration = Date.now() - startTime;
+
+    // Extraire les tokens si disponibles
+    const usage = (result as any).usage;
+    const tokensUsed = usage ? {
+      prompt: usage.promptTokens,
+      completion: usage.completionTokens,
+      total: usage.totalTokens
+    } : undefined;
+
+    // Logger l'appel IA réussi
+    console.log(`AI call successful [${traceId}]`, {
+      provider,
+      model: modelName,
+      duration,
+      tokens: tokensUsed
+    });
+
+    // Extraire les suggestions depuis l'objet retourné et valider le type
+    const aiResponse = result.object as { suggestions: AISuggestionItem[] };
+
+    // Transformer en PricingSuggestion avec IDs
+    return aiResponse.suggestions.map((s, index) => ({
+      id: `suggestion-${Date.now()}-${index}`,
+      type: s.type,
+      idFournisseur: request.idFournisseur,
+      idHebergement: request.idHebergement,
+      idTypeTarif: s.idTypeTarif,
+      dateDebut: s.dateDebut,
+      dateFin: s.dateFin,
+      currentValue: s.currentValue,
+      suggestedValue: s.suggestedValue,
+      confidence: s.confidence,
+      reasoning: s.reasoning,
+      createdAt: new Date(),
+      status: 'pending' as const,
+    }));
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Logger l'appel IA échoué
+    console.error(`AI call failed [${traceId}]`, {
+      provider,
+      model: modelName,
+      duration,
+      error: errorMessage
+    });
+
+    throw error;
+  }
 }
 
