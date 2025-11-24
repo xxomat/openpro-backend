@@ -29,6 +29,7 @@ import { updateDiscoveredRateTypes } from './rateTypeService.js';
  * @param mapPromo - Map des promotions par date (sera modifiée)
  * @param mapRateTypes - Map des types de tarifs par date (sera modifiée)
  * @param mapDureeMin - Map des durées minimales par date (sera modifiée)
+ * @param mapOccupations - Map des occupations par date et type (sera modifiée)
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
  */
 function processTarif(
@@ -39,6 +40,7 @@ function processTarif(
   mapPromo: Record<string, boolean>,
   mapRateTypes: Record<string, string[]>,
   mapDureeMin: Record<string, number | null>,
+  mapOccupations: Record<string, Record<number, Array<{ nbPers: number; prix: number }>>>,
   discoveredRateTypes: Map<number, DiscoveredRateType>
 ): void {
   const deb = tarif.debut ?? tarif.dateDebut ?? debut;
@@ -74,6 +76,10 @@ function processTarif(
     updateDiscoveredRateTypes(discoveredRateTypes, tarif, idType, rateLabel);
   }
   
+  // Extraire les occupations du tarif
+  const pax = tarif.tarifPax ?? tarif.prixPax;
+  const occupations = pax?.listeTarifPaxOccupation ?? tarif.listeTarifPaxOccupation ?? [];
+  
   // Appliquer le tarif à toutes les dates de la période effective
   if (idType && price != null && !isNaN(price)) {
     // Cas où on a un prix valide : on met à jour tarifs, promotions, types et durées minimales
@@ -108,6 +114,19 @@ function processTarif(
         mapDureeMin[key] = null;
       }
       
+      // Stocker les occupations si disponibles
+      if (occupations.length > 0) {
+        if (!mapOccupations[key]) {
+          mapOccupations[key] = {};
+        }
+        mapOccupations[key][idType] = occupations
+          .filter((occ: any) => occ.nbPers != null && occ.prix != null)
+          .map((occ: any) => ({
+            nbPers: Number(occ.nbPers),
+            prix: Number(occ.prix)
+          }));
+      }
+      
       cur.setDate(cur.getDate() + 1);
     }
   } else {
@@ -140,7 +159,7 @@ function processTarif(
  * @param fin - Date de fin au format YYYY-MM-DD
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
- * @returns Objet contenant les maps de tarifs, promotions, types et durées minimales
+ * @returns Objet contenant les maps de tarifs, promotions, types, durées minimales et occupations
  * @throws {Error} Peut lever une erreur si le chargement des tarifs échoue
  * @throws {DOMException} Peut lever une AbortError si la requête est annulée
  */
@@ -157,6 +176,7 @@ export async function loadRatesForAccommodation(
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
   dureeMin: Record<string, number | null>;
+  occupations: Record<string, Record<number, Array<{ nbPers: number; prix: number }>>>;
 }> {
   const openProClient = getOpenProClient(env);
   const rates = await openProClient.getRates(idFournisseur, idHebergement, { debut, fin });
@@ -166,19 +186,21 @@ export async function loadRatesForAccommodation(
   const mapPromo: Record<string, boolean> = {};
   const mapRateTypes: Record<string, string[]> = {};
   const mapDureeMin: Record<string, number | null> = {};
+  const mapOccupations: Record<string, Record<number, Array<{ nbPers: number; prix: number }>>> = {};
   
   const apiResponse = rates as unknown as RatesResponse;
   const tarifs: ApiTarif[] = apiResponse.tarifs ?? apiResponse.periodes ?? [];
   
   for (const tarif of tarifs) {
-    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, discoveredRateTypes);
+    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, mapOccupations, discoveredRateTypes);
   }
   
   return {
     rates: mapRates,
     promo: mapPromo,
     rateTypes: mapRateTypes,
-    dureeMin: mapDureeMin
+    dureeMin: mapDureeMin,
+    occupations: mapOccupations
   };
 }
 
