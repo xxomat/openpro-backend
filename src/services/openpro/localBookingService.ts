@@ -60,6 +60,30 @@ export async function loadLocalBookingsForAccommodation(
 }
 
 /**
+ * Charge toutes les réservations locales d'un fournisseur
+ * 
+ * @param idFournisseur - Identifiant du fournisseur
+ * @param env - Variables d'environnement Workers
+ * @returns Tableau de toutes les réservations locales du fournisseur
+ */
+export async function loadAllLocalBookingsForSupplier(
+  idFournisseur: number,
+  env: Env
+): Promise<BookingDisplay[]> {
+  const result = await env.DB.prepare(`
+    SELECT * FROM local_bookings
+    WHERE id_fournisseur = ?
+    ORDER BY date_arrivee ASC
+  `).bind(idFournisseur).all();
+
+  if (!result.results || result.results.length === 0) {
+    return [];
+  }
+
+  return (result.results as LocalBookingRow[]).map(row => convertRowToBookingDisplay(row));
+}
+
+/**
  * Charge toutes les réservations locales en attente de synchronisation
  * (pour le cron job)
  * 

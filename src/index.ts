@@ -19,6 +19,9 @@ export interface Env {
   // D1 Database
   DB: D1Database;
   
+  // Cloudflare KV (cache iCal)
+  ICAL_CACHE: KVNamespace;
+  
   // Configuration API OpenPro
   OPENPRO_API_KEY: string;
   OPENPRO_BASE_URL: string;

@@ -28,6 +28,8 @@ Le backend couvre les domaines fonctionnels suivants :
 - Gestion des fournisseurs et hébergements
 - Gestion des stocks
 - Gestion des tarifs et types de tarifs
+- Gestion et sauvegarde des réservations locales (Direct)
+- Export des réservations local au format iCal pour intégration externe (OpenPro)
 - Service de suggestions IA pour les ajustements de tarifs
 - Réception et traitement des webhooks OpenPro
 - Persistance des données via Cloudflare D1 (SQLite serverless)
@@ -42,6 +44,7 @@ Le backend couvre les domaines fonctionnels suivants :
 - **Framework**: itty-router (router léger et performant pour Workers)
 - **Langage**: TypeScript
 - **Base de données**: Cloudflare D1 (SQLite serverless)
+- **Cache**: Cloudflare KV (Key-Value store) pour le cache des fichiers iCal
 - **Gestion de paquets**: npm
 - **Client API OpenPro**: sous-module Git `openpro-api-react` (dépôt externe, contient client TypeScript, types Open Pro, et stub-server pour tests)
 - **AI SDK**: Vercel AI SDK (`ai`) avec support OpenAI et Anthropic
@@ -74,6 +77,9 @@ OpenPro.Backend/
 │   │   │   ├── stockService.ts
 │   │   │   ├── supplierDataService.ts
 │   │   │   ├── bulkUpdateService.ts  # Service de transformation bulk
+│   │   │   ├── localBookingService.ts  # Gestion des réservations locales
+│   │   │   ├── icalExportService.ts   # Export iCal des réservations
+│   │   │   ├── stubSyncService.ts     # Synchronisation avec stub-server (dev/test)
 │   │   │   └── utils/
 │   │   │       └── rateUtils.ts
 │   │   └── ai/                 # Services IA
@@ -111,6 +117,7 @@ Vue d'ensemble :
 - Les services métier encapsulent la logique de traitement des données OpenPro.
 - Le service IA utilise le Vercel AI SDK pour générer des suggestions basées sur l'analyse des réservations.
 - **Cloudflare D1** (SQLite serverless) persiste les suggestions IA et autres données.
+- **Cloudflare KV** (Key-Value store) maintient en cache les fichiers iCal des réservations locales pour optimiser les performances.
 - Le client OpenPro est créé via une factory pour chaque requête (compatible Workers).
 - La clé API OpenPro est stockée dans les secrets Cloudflare et n'est jamais exposée au frontend.
 - Les logs sont gérés via `console.log/error` et visibles dans le dashboard Cloudflare.
@@ -169,7 +176,84 @@ Vue d'ensemble :
     ```
   - Utilisé par le frontend pour le polling et détecter les changements (synchronisation ET obsolescence)
 
-#### 3.1.7 Mise à jour en bulk
+#### 3.1.7 Export iCal des réservations locales
+- `GET /api/suppliers/:idFournisseur/local-bookings.ics` - Exporter les réservations locales au format iCalendar (RFC 5545)
+  - **Query parameters optionnels** :
+    - `debut` (string, format `YYYY-MM-DD`) : Date de début pour filtrer les réservations
+    - `fin` (string, format `YYYY-MM-DD`) : Date de fin pour filtrer les réservations
+    - `idHebergement` (number) : ID de l'hébergement pour filtrer les réservations d'un hébergement spécifique
+  - **Format de réponse** :
+    - Content-Type : `text/calendar; charset=utf-8`
+    - Format : iCalendar (RFC 5545)
+    - Extension : `.ics` (pour compatibilité avec les clients calendrier)
+  - **Comportement et cache** :
+    - **Cache Cloudflare KV** : Le fichier iCal est maintenu en cache dans Cloudflare KV pour optimiser les performances
+      - Clé de cache principale : `ical:supplier:{idFournisseur}:current` (ou variantes avec filtres si paramètres fournis)
+      - Le cache est invalidé automatiquement lors de toute modification de réservation locale (création, suppression, modification)
+      - L'endpoint lit d'abord depuis le cache KV, et régénère depuis D1 uniquement si le cache est absent ou invalide
+    - **Historique des versions** : Le système conserve un historique des 10 dernières versions du fichier iCal pour faciliter le debugging
+      - Clés d'historique : `ical:supplier:{idFournisseur}:history:{timestamp}` (format ISO 8601)
+      - À chaque mise à jour du cache :
+        1. La version actuelle est sauvegardée dans l'historique avec un timestamp
+        2. La nouvelle version devient la version actuelle
+        3. Les versions au-delà de la 10ème sont automatiquement supprimées (rotation)
+      - Permet d'investiguer les bugs en comparant les versions successives du fichier iCal
+      - Utile pour comprendre l'évolution des réservations et détecter d'éventuelles anomalies
+    - **Génération du fichier iCal** :
+      - Charge toutes les réservations locales du fournisseur depuis la base de données D1 (si cache absent)
+      - Applique les filtres optionnels (dates, hébergement) si fournis
+      - Convertit chaque réservation en événement `VEVENT` au format iCal
+      - Génère un fichier iCal complet avec tous les événements
+      - Met à jour le cache KV avec le fichier généré
+      - Retourne le fichier iCal directement accessible via URL
+    - **Optimisation** : Cette approche évite de régénérer le fichier iCal à chaque requête (OpenPro accède toutes les 15 minutes), et ne met à jour le cache que lors des modifications peu fréquentes des réservations
+  - **Structure iCal** :
+    - Chaque réservation est convertie en un événement `VEVENT` avec :
+      - `DTSTART` : Date d'arrivée (format `YYYYMMDD`)
+      - `DTEND` : Date de départ (format `YYYYMMDD`)
+      - `SUMMARY` : Nom du client + référence de réservation (ex: "Dupont Jean - RES-2025-001")
+      - `DESCRIPTION` : Détails de la réservation (hébergement, nombre de personnes, montant, etc.)
+      - `UID` : Identifiant unique de la réservation (format: `local-booking-{idFournisseur}-{idDossier}@openpro-backend`)
+      - `STATUS` : `CONFIRMED`
+      - `CREATED` : Date de création de la réservation
+      - `LAST-MODIFIED` : Date de dernière modification
+    - Le fichier iCal inclut les en-têtes standards :
+      - `BEGIN:VCALENDAR`
+      - `VERSION:2.0`
+      - `PRODID:-//OpenPro Backend//iCal Export//FR`
+      - `CALSCALE:GREGORIAN`
+      - `METHOD:PUBLISH`
+  - **Utilisation** :
+    - L'URL peut être utilisée directement par OpenPro pour récupérer les réservations locales
+    - Compatible avec les systèmes de synchronisation calendrier standard
+    - Permet l'intégration avec des outils externes qui consomment des flux iCal
+  - **Exemples d'URL** :
+    - `GET /api/suppliers/12345/local-bookings.ics` - Toutes les réservations du fournisseur
+    - `GET /api/suppliers/12345/local-bookings.ics?debut=2025-01-01&fin=2025-12-31` - Réservations pour l'année 2025
+    - `GET /api/suppliers/12345/local-bookings.ics?idHebergement=47186` - Réservations pour un hébergement spécifique
+  - **Endpoint de debug - Historique** :
+    - `GET /api/suppliers/:idFournisseur/local-bookings.ics/history` - Consulter l'historique des versions du fichier iCal
+      - **Réponse** :
+        ```typescript
+        {
+          currentVersion: {
+            timestamp: string,        // Timestamp ISO 8601 de la version actuelle
+            size: number             // Taille du fichier en octets
+          },
+          history: Array<{
+            timestamp: string,       // Timestamp ISO 8601 de la version
+            size: number             // Taille du fichier en octets
+          }>                         // Liste des versions historiques (max 10, triées du plus récent au plus ancien)
+        }
+        ```
+      - Permet de voir quelles versions sont disponibles pour investigation
+      - Utile pour le debugging et l'analyse des changements dans les réservations
+  - **Réponses d'erreur** :
+    - `400 Bad Request` : Paramètres invalides (format de date incorrect, etc.)
+    - `404 Not Found` : Fournisseur non trouvé
+    - `500 Internal Server Error` : Erreur lors de la génération du fichier iCal
+
+#### 3.1.8 Mise à jour en bulk
 - `POST /api/suppliers/:idFournisseur/bulk-update` - Sauvegarder les modifications de tarifs et durées minimales en bulk
   - **Body** :
     ```typescript
@@ -349,6 +433,36 @@ La configuration se fait via `wrangler.toml` et les secrets Cloudflare.
 - Créer la base : `npm run d1:create`
 - Mettre à jour `database_id` dans `wrangler.toml`
 - Appliquer le schéma : `npm run d1:migrate`
+
+### 5.3 Cloudflare KV (Cache iCal)
+
+**Configuration dans `wrangler.toml`** :
+```toml
+# Cloudflare KV (pour le cache iCal)
+[[kv_namespaces]]
+binding = "ICAL_CACHE"
+id = "your-kv-namespace-id"  # À créer via: wrangler kv:namespace create "ICAL_CACHE"
+preview_id = "your-preview-kv-namespace-id"  # Pour le développement local
+```
+
+**En développement** :
+- Créer le namespace KV de preview : `wrangler kv:namespace create "ICAL_CACHE" --preview`
+- Mettre à jour `preview_id` dans `wrangler.toml`
+- Le namespace de preview est utilisé automatiquement en mode `wrangler dev`
+
+**En production** :
+- Créer le namespace KV de production : `wrangler kv:namespace create "ICAL_CACHE"`
+- Mettre à jour `id` dans `wrangler.toml`
+- Le cache est automatiquement répliqué sur le réseau edge de Cloudflare
+
+**Utilisation** :
+- Le cache KV stocke les fichiers iCal générés pour chaque fournisseur
+- Clé de cache principale : `ical:supplier:{idFournisseur}:current` (ou variantes avec filtres)
+- Clés d'historique : `ical:supplier:{idFournisseur}:history:{timestamp}` (10 dernières versions conservées)
+- Invalidation automatique lors des modifications de réservations locales
+- Rotation automatique de l'historique : les versions au-delà de la 10ème sont supprimées
+- Lecture depuis le cache lors des requêtes GET, régénération depuis D1 si cache absent
+- L'historique permet d'investiguer les bugs en comparant les versions successives du fichier iCal
 
 ---
 
@@ -549,6 +663,9 @@ Configurer dans Cloudflare Dashboard :
 
 ### 9.1 Cache
 
+✅ **Implémenté** : Cache Cloudflare KV pour les fichiers iCal des réservations locales
+
+**Améliorations futures** :
 - Implémenter Cloudflare Cache API ou KV pour les données fréquemment demandées (hébergements, types de tarifs)
 - Réduire les appels à l'API OpenPro
 - TTL configurable par type de données

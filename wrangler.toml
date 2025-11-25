@@ -24,6 +24,14 @@ binding = "DB"
 database_name = "openpro-db"
 database_id = "00000000-0000-0000-0000-000000000000" # Vide = base locale automatique, ou ID de production après: npm run d1:create
 
+# Cloudflare KV (pour le cache iCal)
+# En développement: wrangler kv:namespace create "ICAL_CACHE" --preview
+# En production: wrangler kv:namespace create "ICAL_CACHE"
+[[kv_namespaces]]
+binding = "ICAL_CACHE"
+id = "00000000000000000000000000000000"  # À remplacer par l'ID de production après création
+preview_id = "00000000000000000000000000000000"  # À remplacer par l'ID de preview après création
+
 # Configuration pour le développement local
 [dev]
 port = 8787
