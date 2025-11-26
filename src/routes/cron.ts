@@ -109,41 +109,48 @@ async function validateDirectBookingsSync(env: Env): Promise<{
       }> = [];
       
       // Convertir les réservations OpenPro en BookingDisplay et filtrer les Direct
-      for (const dossier of bookingList.dossiers ?? []) {
-        const booking = dossier as any;
-        if (booking.hebergement?.dateArrivee && booking.hebergement?.dateDepart) {
-          // Déterminer la plateforme
-          let plateforme = PlateformeReservation.Unknown;
-          if (booking.transaction?.transactionResaLocale) {
-            plateforme = PlateformeReservation.Directe;
-          } else if (booking.transaction?.transactionBooking) {
-            plateforme = PlateformeReservation.BookingCom;
-          } else if (booking.transaction?.transactionXotelia) {
-            plateforme = PlateformeReservation.Xotelia;
-          } else if (booking.transaction?.transactionOpenSystem) {
-            plateforme = PlateformeReservation.OpenPro;
-          }
-          
-          if (plateforme === PlateformeReservation.Directe) {
-            const idDossier = booking.idDossier ?? 0;
-            // Log pour diagnostic si idDossier est manquant
-            if (!idDossier || idDossier === 0) {
-              console.warn(`[CRON] Direct booking without idDossier:`, {
-                reference: booking.reference,
-                idDossier: booking.idDossier,
-                bookingKeys: Object.keys(booking)
+      // Le nouveau format retourne une liste de résumés, il faut charger les détails complets
+      for (const summary of bookingList.liste ?? []) {
+        // Charger les détails complets du dossier
+        const dossier = await openProClient.getBooking(summary.cleDossier.idFournisseur, summary.cleDossier.idDossier);
+        
+        // Le nouveau format peut avoir plusieurs hébergements dans listeHebergement
+        const listeHebergement = dossier.listeHebergement ?? [];
+        
+        for (const hebergementItem of listeHebergement) {
+          if (hebergementItem.sejour?.debut && hebergementItem.sejour?.fin) {
+            // Déterminer la plateforme
+            let plateforme = PlateformeReservation.Unknown;
+            if (dossier.transaction?.transactionResaLocale) {
+              plateforme = PlateformeReservation.Directe;
+            } else if (dossier.transaction?.transactionBooking) {
+              plateforme = PlateformeReservation.BookingCom;
+            } else if (dossier.transaction?.transactionXotelia) {
+              plateforme = PlateformeReservation.Xotelia;
+            } else if (dossier.transaction?.transactionOpenSystem) {
+              plateforme = PlateformeReservation.OpenPro;
+            }
+            
+            if (plateforme === PlateformeReservation.Directe) {
+              const idDossier = dossier.cleDossier.idDossier;
+              // Log pour diagnostic si idDossier est manquant
+              if (!idDossier || idDossier === 0) {
+                console.warn(`[CRON] Direct booking without idDossier:`, {
+                  cleDossier: dossier.cleDossier,
+                  dossierKeys: Object.keys(dossier)
+                });
+              }
+              openProBookings.push({
+                idDossier: idDossier,
+                idHebergement: hebergementItem.cleHebergement.idHebergement,
+                dateArrivee: hebergementItem.sejour.debut,
+                dateDepart: hebergementItem.sejour.fin,
+                reference: undefined, // Le nouveau format n'a pas de reference au niveau du dossier
+                plateformeReservation: PlateformeReservation.Directe,
+                isPendingSync: false,
+                isObsolete: false
               });
             }
-            openProBookings.push({
-              idDossier: idDossier,
-              idHebergement: booking.hebergement.idHebergement ?? 0,
-              dateArrivee: booking.hebergement.dateArrivee,
-              dateDepart: booking.hebergement.dateDepart,
-              reference: booking.reference || undefined,
-              plateformeReservation: PlateformeReservation.Directe,
-              isPendingSync: false,
-              isObsolete: false
-            });
           }
         }
       }

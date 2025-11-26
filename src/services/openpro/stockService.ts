@@ -42,12 +42,14 @@ export async function loadStockForAccommodation(
   if (signal?.aborted) throw new Error('Cancelled');
   
   const mapStock: Record<string, number> = {};
-  const jours = (stock as any).jours ?? (stock as any).stock ?? [];
-  for (const j of jours) {
+  // Format OpenPro : { listeStock: [{ date, valeur }] }
+  // Compatibilité avec ancien format : { jours: [{ date, dispo }] } ou { stock: [{ jour, stock }] }
+  const stockArray = (stock as any).listeStock ?? (stock as any).stock ?? (stock as any).jours ?? [];
+  for (const j of stockArray) {
     const date = j.date ?? j.jour;
-    const dispo = j.dispo ?? j.stock ?? 0;
+    const valeur = j.valeur ?? j.dispo ?? j.stock ?? 0;
     if (date) {
-      mapStock[String(date)] = Number(dispo ?? 0);
+      mapStock[String(date)] = Number(valeur ?? 0);
     }
   }
   return mapStock;

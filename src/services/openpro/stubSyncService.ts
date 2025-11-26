@@ -113,10 +113,15 @@ export async function syncBookingToStub(
   
   try {
     const dossier = convertBookingToDossier(booking, idFournisseur);
+    const url = `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers`;
+    const startTime = Date.now();
+    
+    // Logger l'appel OpenPro
+    console.log(`[OpenPro API] POST ${url}`, { body: dossier });
     
     // Envoyer la requête POST au stub-server
     const response = await fetch(
-      `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers`,
+      url,
       {
         method: 'POST',
         headers: {
@@ -127,8 +132,11 @@ export async function syncBookingToStub(
       }
     );
     
+    const duration = Date.now() - startTime;
+    
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`[OpenPro API] POST ${url} → ${response.status} (${duration}ms)`, { error: errorText });
       console.error(`[STUB SYNC] Failed to sync booking to stub-server: ${response.status} ${errorText}`);
       // Ne pas faire échouer la création de réservation si la sync échoue
       return;
@@ -136,8 +144,10 @@ export async function syncBookingToStub(
     
     const result = await response.json();
     if (result.ok === 1) {
+      console.log(`[OpenPro API] POST ${url} → ${response.status} (${duration}ms)`);
       console.log(`[STUB SYNC] Successfully synced booking ${booking.idDossier} to stub-server`);
     } else {
+      console.error(`[OpenPro API] POST ${url} → ${response.status} (${duration}ms)`, { error: result });
       console.error(`[STUB SYNC] Stub-server returned ok=0:`, result);
     }
   } catch (error) {
@@ -171,6 +181,10 @@ export async function deleteBookingFromStubById(
   
   try {
     const url = `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers/${idDossier}`;
+    const startTime = Date.now();
+    
+    // Logger l'appel OpenPro
+    console.log(`[OpenPro API] DELETE ${url}`);
     console.log(`[STUB SYNC] Deleting booking ${idDossier} from stub-server at ${url}`);
     
     // Supprimer directement le dossier par ID
@@ -182,13 +196,17 @@ export async function deleteBookingFromStubById(
       }
     });
     
+    const duration = Date.now() - startTime;
+    
     if (!deleteResponse.ok) {
       const errorText = await deleteResponse.text();
+      console.error(`[OpenPro API] DELETE ${url} → ${deleteResponse.status} (${duration}ms)`, { error: errorText });
       console.error(`[STUB SYNC] Failed to delete booking ${idDossier} from stub-server: ${deleteResponse.status} ${errorText}`);
       return;
     }
     
     const result = await deleteResponse.json();
+    console.log(`[OpenPro API] DELETE ${url} → ${deleteResponse.status} (${duration}ms)`);
     console.log(`[STUB SYNC] Successfully deleted booking ${idDossier} from stub-server`, result);
   } catch (error) {
     // Ne pas faire échouer la suppression si la sync stub échoue
@@ -219,8 +237,14 @@ export async function deleteBookingFromStub(
   try {
     // Trouver le dossier correspondant dans le stub-server par les critères
     // (idFournisseur, idHebergement, dateArrivee, dateDepart)
+    const url = `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers`;
+    const startTime = Date.now();
+    
+    // Logger l'appel OpenPro
+    console.log(`[OpenPro API] GET ${url}`);
+    
     const response = await fetch(
-      `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers`,
+      url,
       {
         method: 'GET',
         headers: {
@@ -230,7 +254,10 @@ export async function deleteBookingFromStub(
       }
     );
     
+    const duration = Date.now() - startTime;
+    
     if (!response.ok) {
+      console.error(`[OpenPro API] GET ${url} → ${response.status} (${duration}ms)`);
       console.error(`[STUB SYNC] Failed to fetch bookings from stub-server: ${response.status}`);
       return;
     }
@@ -254,8 +281,14 @@ export async function deleteBookingFromStub(
     }
     
     // Supprimer le dossier du stub-server
+    const deleteUrl = `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers/${matchingDossier.idDossier}`;
+    const deleteStartTime = Date.now();
+    
+    // Logger l'appel OpenPro
+    console.log(`[OpenPro API] DELETE ${deleteUrl}`);
+    
     const deleteResponse = await fetch(
-      `${env.OPENPRO_BASE_URL}/fournisseur/${idFournisseur}/dossiers/${matchingDossier.idDossier}`,
+      deleteUrl,
       {
         method: 'DELETE',
         headers: {
@@ -265,12 +298,16 @@ export async function deleteBookingFromStub(
       }
     );
     
+    const deleteDuration = Date.now() - deleteStartTime;
+    
     if (!deleteResponse.ok) {
       const errorText = await deleteResponse.text();
+      console.error(`[OpenPro API] DELETE ${deleteUrl} → ${deleteResponse.status} (${deleteDuration}ms)`, { error: errorText });
       console.error(`[STUB SYNC] Failed to delete booking from stub-server: ${deleteResponse.status} ${errorText}`);
       return;
     }
     
+    console.log(`[OpenPro API] DELETE ${deleteUrl} → ${deleteResponse.status} (${deleteDuration}ms)`);
     console.log(`[STUB SYNC] Successfully deleted booking ${matchingDossier.idDossier} from stub-server`);
   } catch (error) {
     // Ne pas faire échouer la suppression si la sync stub échoue

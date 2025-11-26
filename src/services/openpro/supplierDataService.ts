@@ -50,7 +50,7 @@ export async function getSupplierData(
   const nextRates: Record<number, Record<string, Record<number, number>>> = {};
   const nextPromo: Record<number, Record<string, boolean>> = {};
   const nextRateTypes: Record<number, Record<string, string[]>> = {};
-  const nextDureeMin: Record<number, Record<string, number | null>> = {};
+  const nextDureeMin: Record<number, Record<string, Record<number, number | null>>> = {};
   const nextBookings: Record<number, import('../../types/api.js').BookingDisplay[]> = {};
   const debut = formatDate(startDate);
   const fin = formatDate(endDate);

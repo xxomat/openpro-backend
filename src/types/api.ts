@@ -68,7 +68,7 @@ export interface SupplierData {
   rates: Record<number, Record<string, Record<number, number>>>;
   promo: Record<number, Record<string, boolean>>;
   rateTypes: Record<number, Record<string, string[]>>;
-  dureeMin: Record<number, Record<string, number | null>>;
+  dureeMin: Record<number, Record<string, Record<number, number | null>>>;
   rateTypeLabels: Record<number, string>;
   rateTypesList: RateType[];
   bookings: Record<number, BookingDisplay[]>;
@@ -78,6 +78,6 @@ export interface RatesData {
   rates: Record<string, Record<number, number>>;
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
-  dureeMin: Record<string, number | null>;
+  dureeMin: Record<string, Record<number, number | null>>;
 }
 

@@ -28,7 +28,7 @@ import { updateDiscoveredRateTypes } from './rateTypeService.js';
  * @param mapRates - Map des tarifs par date et type (sera modifiée)
  * @param mapPromo - Map des promotions par date (sera modifiée)
  * @param mapRateTypes - Map des types de tarifs par date (sera modifiée)
- * @param mapDureeMin - Map des durées minimales par date (sera modifiée)
+ * @param mapDureeMin - Map des durées minimales par date et type de tarif (sera modifiée)
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
  */
 function processTarif(
@@ -38,7 +38,7 @@ function processTarif(
   mapRates: Record<string, Record<number, number>>,
   mapPromo: Record<string, boolean>,
   mapRateTypes: Record<string, string[]>,
-  mapDureeMin: Record<string, number | null>,
+  mapDureeMin: Record<string, Record<number, number | null>>,
   discoveredRateTypes: Map<number, DiscoveredRateType>
 ): void {
   const deb = tarif.debut ?? tarif.dateDebut ?? debut;
@@ -99,13 +99,11 @@ function processTarif(
         }
       }
       
-      if (dureeMinValue != null) {
-        const existingDureeMin = mapDureeMin[key];
-        if (existingDureeMin == null || dureeMinValue > existingDureeMin) {
-          mapDureeMin[key] = dureeMinValue;
+      if (dureeMinValue != null && idType) {
+        if (!mapDureeMin[key]) {
+          mapDureeMin[key] = {};
         }
-      } else if (mapDureeMin[key] == null) {
-        mapDureeMin[key] = null;
+        mapDureeMin[key][idType] = dureeMinValue;
       }
       
       cur.setDate(cur.getDate() + 1);
@@ -115,13 +113,11 @@ function processTarif(
     const cur = new Date(actualStart);
     while (cur <= actualEnd) {
       const key = formatDate(cur);
-      if (dureeMinValue != null) {
-        const existingDureeMin = mapDureeMin[key];
-        if (existingDureeMin == null || dureeMinValue > existingDureeMin) {
-          mapDureeMin[key] = dureeMinValue;
+      if (dureeMinValue != null && idType) {
+        if (!mapDureeMin[key]) {
+          mapDureeMin[key] = {};
         }
-      } else if (mapDureeMin[key] == null) {
-        mapDureeMin[key] = null;
+        mapDureeMin[key][idType] = dureeMinValue;
       }
       cur.setDate(cur.getDate() + 1);
     }
@@ -156,7 +152,7 @@ export async function loadRatesForAccommodation(
   rates: Record<string, Record<number, number>>;
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
-  dureeMin: Record<string, number | null>;
+  dureeMin: Record<string, Record<number, number | null>>;
 }> {
   const openProClient = getOpenProClient(env);
   const rates = await openProClient.getRates(idFournisseur, idHebergement, { debut, fin });
@@ -165,7 +161,7 @@ export async function loadRatesForAccommodation(
   const mapRates: Record<string, Record<number, number>> = {};
   const mapPromo: Record<string, boolean> = {};
   const mapRateTypes: Record<string, string[]> = {};
-  const mapDureeMin: Record<string, number | null> = {};
+  const mapDureeMin: Record<string, Record<number, number | null>> = {};
   
   const apiResponse = rates as unknown as RatesResponse;
   const tarifs: ApiTarif[] = apiResponse.tarifs ?? apiResponse.periodes ?? [];

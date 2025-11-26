@@ -149,8 +149,7 @@ function transformPeriodToTarifModif(period: {
   if (period.price !== undefined) {
     tarifPax.listeTarifPaxOccupation = [
       {
-        type: 'base',
-        nbPers: 2,
+        type: 'defaut',
         prix: period.price
       }
     ];
