@@ -41,12 +41,35 @@ function processTarif(
   mapDureeMin: Record<string, Record<number, number | null>>,
   discoveredRateTypes: Map<number, DiscoveredRateType>
 ): void {
-  const deb = tarif.debut ?? tarif.dateDebut ?? debut;
-  const fe = tarif.fin ?? tarif.dateFin ?? fin;
+  // Lire les dates du tarif (gérer le cas où "fin " a un espace à la fin)
+  // IMPORTANT : Ne pas utiliser les paramètres debut/fin comme fallback car chaque tarif
+  // doit avoir ses propres dates explicites dans la réponse API
+  // L'API peut retourner "fin " avec un espace comme clé de propriété, donc on doit chercher
+  // dans toutes les clés de l'objet pour trouver "fin" ou "fin "
+  const deb = String(tarif.debut ?? tarif.dateDebut ?? '').trim();
+  // Chercher "fin" dans les clés de l'objet (peut être "fin" ou "fin " avec espace)
+  const fe = String(
+    tarif.fin ?? 
+    tarif.dateFin ?? 
+    (tarif as any)['fin '] ?? 
+    (tarif as any)['dateFin '] ?? 
+    ''
+  ).trim();
+  
+  // Si le tarif n'a pas de dates explicites, ignorer (ne pas utiliser debut/fin comme fallback)
+  if (!deb || !fe) {
+    return;
+  }
+  
   const startD = new Date(deb + 'T00:00:00');
   const endD = new Date(fe + 'T23:59:59');
   const requestedStart = new Date(debut + 'T00:00:00');
   const requestedEnd = new Date(fin + 'T23:59:59');
+  
+  // Vérifier que les dates sont valides
+  if (isNaN(startD.getTime()) || isNaN(endD.getTime())) {
+    return;
+  }
   
   // Ignorer les tarifs en dehors de la plage demandée
   if (endD < requestedStart || startD > requestedEnd) {
@@ -54,6 +77,7 @@ function processTarif(
   }
   
   // Calculer la période effective (intersection entre la période du tarif et la plage demandée)
+  // Chaque tarif de l'API a généralement debut = fin (une seule date), donc actualStart = actualEnd
   const actualStart = startD > requestedStart ? startD : requestedStart;
   const actualEnd = endD < requestedEnd ? endD : requestedEnd;
   
@@ -155,7 +179,8 @@ export async function loadRatesForAccommodation(
   dureeMin: Record<string, Record<number, number | null>>;
 }> {
   const openProClient = getOpenProClient(env);
-  const rates = await openProClient.getRates(idFournisseur, idHebergement, { debut, fin });
+  // Ne pas passer de paramètres de date à getRates selon la documentation API
+  const rates = await openProClient.getRates(idFournisseur, idHebergement);
   if (signal?.aborted) throw new Error('Cancelled');
   
   const mapRates: Record<string, Record<number, number>> = {};

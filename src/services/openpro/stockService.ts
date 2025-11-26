@@ -33,12 +33,8 @@ export async function loadStockForAccommodation(
   signal?: AbortSignal
 ): Promise<Record<string, number>> {
   const openProClient = getOpenProClient(env);
-  const stock = await openProClient.getStock(idFournisseur, idHebergement, {
-    debut,
-    fin,
-    start: debut,
-    end: fin
-  } as unknown as { debut?: string; fin?: string });
+  // Ne pas passer de paramètres de date à getStock selon la documentation API
+  const stock = await openProClient.getStock(idFournisseur, idHebergement);
   if (signal?.aborted) throw new Error('Cancelled');
   
   const mapStock: Record<string, number> = {};

@@ -72,6 +72,8 @@ export interface SupplierData {
   rateTypeLabels: Record<number, string>;
   rateTypesList: RateType[];
   bookings: Record<number, BookingDisplay[]>;
+  /** Map des IDs de types de tarif liés par hébergement (clé: idHebergement, valeur: array d'idTypeTarif) */
+  rateTypeLinksByAccommodation: Record<number, number[]>;
 }
 
 export interface RatesData {

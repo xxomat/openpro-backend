@@ -166,17 +166,237 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
-      const accommodations = await getAccommodations(idFournisseur, env);
-      const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodations, env);
-      const { rateTypeLabels, rateTypesList } = buildRateTypesList(discoveredRateTypes);
+      // Pour la modale de gestion, on veut tous les types de tarif, pas seulement ceux liés
+      const openProClient = getOpenProClient(env);
+      const allRateTypesResponse = await openProClient.listRateTypes(idFournisseur);
+      
+      logger.info('Raw response from OpenPro API:', JSON.stringify(allRateTypesResponse, null, 2));
+      
+      // Adapter le format de réponse pour correspondre à ce que le frontend attend
+      const apiRateTypesResponse = allRateTypesResponse as unknown as { typeTarifs?: unknown[] };
+      const rawTypeTarifs = apiRateTypesResponse.typeTarifs || [];
+      
+      logger.info(`Found ${rawTypeTarifs.length} raw rate types`);
+      
+      // Normaliser la structure : l'API OpenPro peut retourner cleTypeTarif.idTypeTarif ou idTypeTarif directement
+      const typeTarifs = rawTypeTarifs.map((rt: any) => {
+        const idTypeTarif = rt.cleTypeTarif?.idTypeTarif ?? rt.idTypeTarif;
+        // Ne garder que les champs nécessaires, sans cleTypeTarif
+        return {
+          idTypeTarif: Number(idTypeTarif),
+          libelle: rt.libelle,
+          description: rt.description,
+          ordre: rt.ordre != null ? Number(rt.ordre) : undefined
+        };
+      }).filter((rt: any) => {
+        const isValid = rt.idTypeTarif != null && !isNaN(rt.idTypeTarif);
+        if (!isValid) {
+          logger.warn(`Filtered out invalid rate type:`, JSON.stringify(rt, null, 2));
+        }
+        return isValid;
+      });
+      
+      logger.info(`Returning ${typeTarifs.length} normalized rate types`);
       
       return jsonResponse({
-        rateTypeLabels,
-        rateTypesList
+        typeTarifs
       });
     } catch (error) {
       logger.error('Error fetching rate types', error);
-      return errorResponse('Failed to fetch rate types', 500);
+      return errorResponse(
+        'Failed to fetch rate types',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // POST /api/suppliers/:idFournisseur/rate-types
+  router.post('/api/suppliers/:idFournisseur/rate-types', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    let payload: { typeTarifModif: unknown };
+    try {
+      payload = await request.json() as { typeTarifModif: unknown };
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
+    }
+    
+    if (!payload || !payload.typeTarifModif) {
+      return errorResponse('Request body must contain typeTarifModif', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      const result = await openProClient.createRateType(idFournisseur, payload.typeTarifModif as any);
+      return jsonResponse(result);
+    } catch (error) {
+      logger.error('Error creating rate type', error);
+      return errorResponse(
+        'Failed to create rate type',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // PUT /api/suppliers/:idFournisseur/rate-types/:idTypeTarif
+  router.put('/api/suppliers/:idFournisseur/rate-types/:idTypeTarif', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    if (isNaN(idTypeTarif)) {
+      return errorResponse('Invalid idTypeTarif', 400);
+    }
+    
+    let payload: { typeTarifModif: unknown };
+    try {
+      payload = await request.json() as { typeTarifModif: unknown };
+    } catch (error) {
+      return errorResponse('Invalid JSON body', 400);
+    }
+    
+    if (!payload || !payload.typeTarifModif) {
+      return errorResponse('Request body must contain typeTarifModif', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      await openProClient.updateRateType(idFournisseur, idTypeTarif, payload.typeTarifModif as any);
+      return jsonResponse({ success: true });
+    } catch (error) {
+      logger.error('Error updating rate type', error);
+      return errorResponse(
+        'Failed to update rate type',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // DELETE /api/suppliers/:idFournisseur/rate-types/:idTypeTarif
+  router.delete('/api/suppliers/:idFournisseur/rate-types/:idTypeTarif', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    if (isNaN(idTypeTarif)) {
+      return errorResponse('Invalid idTypeTarif', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      await openProClient.deleteRateType(idFournisseur, idTypeTarif);
+      return jsonResponse({ success: true });
+    } catch (error) {
+      logger.error('Error deleting rate type', error);
+      return errorResponse(
+        'Failed to delete rate type',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links
+  router.get('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    if (isNaN(idHebergement)) {
+      return errorResponse('Invalid idHebergement', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      const result = await openProClient.listAccommodationRateTypeLinks(idFournisseur, idHebergement);
+      return jsonResponse(result);
+    } catch (error) {
+      logger.error('Error fetching accommodation rate type links', error);
+      return errorResponse(
+        'Failed to fetch accommodation rate type links',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // POST /api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif
+  router.post('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    if (isNaN(idHebergement)) {
+      return errorResponse('Invalid idHebergement', 400);
+    }
+    
+    if (isNaN(idTypeTarif)) {
+      return errorResponse('Invalid idTypeTarif', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      await openProClient.linkRateTypeToAccommodation(idFournisseur, idHebergement, idTypeTarif);
+      return jsonResponse({ success: true });
+    } catch (error) {
+      logger.error('Error linking rate type to accommodation', error);
+      return errorResponse(
+        'Failed to link rate type to accommodation',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // DELETE /api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif
+  router.delete('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
+    
+    if (isNaN(idFournisseur)) {
+      return errorResponse('Invalid idFournisseur', 400);
+    }
+    
+    if (isNaN(idHebergement)) {
+      return errorResponse('Invalid idHebergement', 400);
+    }
+    
+    if (isNaN(idTypeTarif)) {
+      return errorResponse('Invalid idTypeTarif', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      await openProClient.unlinkRateTypeFromAccommodation(idFournisseur, idHebergement, idTypeTarif);
+      return jsonResponse({ success: true });
+    } catch (error) {
+      logger.error('Error unlinking rate type from accommodation', error);
+      return errorResponse(
+        'Failed to unlink rate type from accommodation',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
     }
   });
 
