@@ -5,7 +5,7 @@
  * pour un hébergement depuis l'API OpenPro.
  */
 
-import type { BookingDisplay } from '../../types/api.js';
+import type { IBookingDisplay } from '../../types/api.js';
 import { PlateformeReservation } from '../../types/api.js';
 import { getOpenProClient } from '../openProClient.js';
 import type { Booking, DossierTransaction } from '../../../openpro-api-react/src/client/types.js';
@@ -52,7 +52,7 @@ function getPlateformeReservation(
  * 
  * Cette fonction récupère toutes les réservations du fournisseur depuis l'API OpenPro
  * et filtre celles qui correspondent à l'hébergement donné. Les réservations sont
- * transformées en BookingDisplay pour l'affichage dans le frontend.
+ * transformées en IBookingDisplay pour l'affichage dans le frontend.
  * 
  * Si des réservations locales sont fournies, elles sont fusionnées avec les réservations OpenPro :
  * - Les réservations locales qui correspondent à une réservation OpenPro sont remplacées par la version OpenPro
@@ -63,7 +63,7 @@ function getPlateformeReservation(
  * se chargera de filtrer celles à afficher selon la plage de dates sélectionnée.
  * 
  * @param idFournisseur - Identifiant du fournisseur
- * @param idHebergement - Identifiant de l'hébergement
+ * @param accommodationId - Identifiant de l'hébergement
  * @param env - Variables d'environnement Workers
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
  * @param localBookings - Réservations locales optionnelles à fusionner
@@ -73,17 +73,17 @@ function getPlateformeReservation(
  */
 export async function loadBookingsForAccommodation(
   idFournisseur: number,
-  idHebergement: number,
+  accommodationId: number,
   env: Env,
   signal?: AbortSignal,
-  localBookings?: BookingDisplay[]
-): Promise<BookingDisplay[]> {
+  localBookings?: IBookingDisplay[]
+): Promise<IBookingDisplay[]> {
   const openProClient = getOpenProClient(env);
   // Charger toutes les réservations du fournisseur (pas de filtre par dates)
   const bookingList = await openProClient.listBookings(idFournisseur);
   if (signal?.aborted) throw new Error('Cancelled');
   
-  const bookings: BookingDisplay[] = [];
+  const bookings: IBookingDisplay[] = [];
   // Le nouveau format retourne une liste de résumés (BookingSummary)
   // Il faut charger les détails complets pour chaque résumé
   const summaries = bookingList.liste ?? [];
@@ -99,7 +99,7 @@ export async function loadBookingsForAccommodation(
     
     for (const hebergementItem of listeHebergement) {
       // Filtrer par hébergement
-      if (hebergementItem.cleHebergement?.idHebergement !== idHebergement) {
+      if (hebergementItem.cleHebergement?.idHebergement !== accommodationId) {
         continue;
       }
       
@@ -109,119 +109,119 @@ export async function loadBookingsForAccommodation(
       }
       
       // Extraire toutes les informations du contact
-      let clientNom: string | undefined;
-      let clientCivilite: string | undefined;
+      let clientName: string | undefined;
+      let clientTitle: string | undefined;
       let clientEmail: string | undefined;
-      let clientTelephone: string | undefined;
-      let clientRemarques: string | undefined;
-      let clientAdresse: string | undefined;
-      let clientCodePostal: string | undefined;
-      let clientVille: string | undefined;
-      let clientPays: string | undefined;
-      let clientDateNaissance: string | undefined;
-      let clientNationalite: string | undefined;
+      let clientPhone: string | undefined;
+      let clientNotes: string | undefined;
+      let clientAddress: string | undefined;
+      let clientPostalCode: string | undefined;
+      let clientCity: string | undefined;
+      let clientCountry: string | undefined;
+      let clientBirthDate: string | undefined;
+      let clientNationality: string | undefined;
       let clientProfession: string | undefined;
-      let clientSociete: string | undefined;
+      let clientCompany: string | undefined;
       let clientSiret: string | undefined;
-      let clientTva: string | undefined;
-      let clientLangue: string | undefined;
+      let clientVat: string | undefined;
+      let clientLanguage: string | undefined;
       let clientNewsletter: boolean | undefined;
-      let clientCgvAcceptees: boolean | undefined;
+      let clientTermsAccepted: boolean | undefined;
       
       if (dossier.contact) {
         const parts: string[] = [];
         if (dossier.contact.prenom) parts.push(dossier.contact.prenom);
         if (dossier.contact.nom) parts.push(dossier.contact.nom);
-        clientNom = parts.length > 0 ? parts.join(' ') : undefined;
+        clientName = parts.length > 0 ? parts.join(' ') : undefined;
         // Note: contact n'a pas de civilite dans le nouveau format
         clientEmail = dossier.contact.email;
-        clientTelephone = dossier.contact.telephone1;
-        clientRemarques = dossier.contact.remarques ?? undefined;
-        clientAdresse = dossier.contact.adresse;
-        clientCodePostal = dossier.contact.codePostal;
-        clientVille = dossier.contact.ville;
-        clientPays = dossier.contact.pays;
+        clientPhone = dossier.contact.telephone1;
+        clientNotes = dossier.contact.remarques ?? undefined;
+        clientAddress = dossier.contact.adresse;
+        clientPostalCode = dossier.contact.codePostal;
+        clientCity = dossier.contact.ville;
+        clientCountry = dossier.contact.pays;
         // Note: contact n'a pas dateNaissance, nationalite, profession dans le nouveau format
-        clientSociete = dossier.contact.societe ?? undefined;
+        clientCompany = dossier.contact.societe ?? undefined;
         // Note: contact n'a pas siret, tva, langue, newsletter, cgvAcceptees dans le nouveau format
       }
       
       // Extraire le montant et la devise
-      const montantTotal = hebergementItem.montant;
-      const devise = dossier.devise;
+      const totalAmount = hebergementItem.montant;
+      const currency = dossier.devise;
       
       // Extraire les informations de l'hébergement
-      const nbPersonnes = hebergementItem.pax?.nbPers;
+      const numberOfPersons = hebergementItem.pax?.nbPers;
       // Calculer le nombre de nuits à partir des dates
-      const dateArrivee = hebergementItem.sejour.debut;
-      const dateDepart = hebergementItem.sejour.fin;
-      const nbNuits = dateArrivee && dateDepart 
-        ? Math.ceil((new Date(dateDepart).getTime() - new Date(dateArrivee).getTime()) / (1000 * 60 * 60 * 24))
+      const arrivalDate = hebergementItem.sejour.debut;
+      const departureDate = hebergementItem.sejour.fin;
+      const numberOfNights = arrivalDate && departureDate 
+        ? Math.ceil((new Date(departureDate).getTime() - new Date(arrivalDate).getTime()) / (1000 * 60 * 60 * 24))
         : undefined;
-      const typeTarifLibelle = hebergementItem.tarif?.typeTarif?.libelle;
+      const rateTypeLabel = hebergementItem.tarif?.typeTarif?.libelle;
       
       // Extraire la date de création
-      const dateCreation = dossier.dateCreation;
+      const creationDate = dossier.dateCreation;
       
       // Déterminer la plateforme de réservation et extraire la référence
       // Adapter getPlateformeReservation pour le nouveau format de transaction
-      let plateformeReservation = PlateformeReservation.Unknown;
+      let reservationPlatform = PlateformeReservation.Unknown;
       let reference: string | undefined = undefined;
       
       if (dossier.transaction) {
         if (dossier.transaction.transactionResaLocale) {
-          plateformeReservation = PlateformeReservation.Directe;
+          reservationPlatform = PlateformeReservation.Directe;
           // Pour ResaLocale, on peut utiliser idTransaction ou reference si disponible
           const resaLocale = dossier.transaction.transactionResaLocale as any;
           reference = resaLocale?.reference || resaLocale?.idTransaction || undefined;
         } else if (dossier.transaction.transactionBooking) {
-          plateformeReservation = PlateformeReservation.BookingCom;
+          reservationPlatform = PlateformeReservation.BookingCom;
           // Pour Booking, on peut utiliser confirmationCode ou reference si disponible
           const booking = dossier.transaction.transactionBooking as any;
           reference = booking?.confirmationCode || booking?.reference || booking?.idTransaction || undefined;
         } else if (dossier.transaction.transactionXotelia) {
-          plateformeReservation = PlateformeReservation.Xotelia;
+          reservationPlatform = PlateformeReservation.Xotelia;
           // Pour Xotelia, on peut utiliser reference ou idTransaction si disponible
           const xotelia = dossier.transaction.transactionXotelia as any;
           reference = xotelia?.reference || xotelia?.idTransaction || undefined;
         } else if (dossier.transaction.transactionOpenSystem) {
-          plateformeReservation = PlateformeReservation.OpenPro;
+          reservationPlatform = PlateformeReservation.OpenPro;
           // Pour OpenSystem, utiliser idReservation (c'est la référence principale)
           reference = dossier.transaction.transactionOpenSystem.idReservation || undefined;
         }
       }
       
       bookings.push({
-        idDossier: dossier.cleDossier.idDossier,
-        idHebergement: hebergementItem.cleHebergement.idHebergement,
-        dateArrivee: hebergementItem.sejour.debut,
-        dateDepart: hebergementItem.sejour.fin,
+        bookingId: dossier.cleDossier.idDossier,
+        accommodationId: hebergementItem.cleHebergement.idHebergement,
+        arrivalDate: hebergementItem.sejour.debut,
+        departureDate: hebergementItem.sejour.fin,
         reference,
-        clientNom,
-        clientCivilite,
+        clientName,
+        clientTitle,
         clientEmail,
-        clientTelephone,
-        clientRemarques,
-        clientAdresse,
-        clientCodePostal,
-        clientVille,
-        clientPays,
-        clientDateNaissance,
-        clientNationalite,
+        clientPhone,
+        clientNotes,
+        clientAddress,
+        clientPostalCode,
+        clientCity,
+        clientCountry,
+        clientBirthDate,
+        clientNationality,
         clientProfession,
-        clientSociete,
+        clientCompany,
         clientSiret,
-        clientTva,
-        clientLangue,
+        clientVat,
+        clientLanguage,
         clientNewsletter,
-        clientCgvAcceptees,
-        montantTotal,
-        nbPersonnes,
-        nbNuits,
-        typeTarifLibelle,
-        devise,
-        dateCreation,
-        plateformeReservation,
+        clientTermsAccepted,
+        totalAmount,
+        numberOfPersons,
+        numberOfNights,
+        rateTypeLabel,
+        currency,
+        creationDate,
+        reservationPlatform,
         isPendingSync: false,
         isObsolete: false
       });
@@ -232,7 +232,7 @@ export async function loadBookingsForAccommodation(
   if (localBookings && localBookings.length > 0) {
     // Filtrer les réservations Direct depuis OpenPro
     const openProDirectBookings = bookings.filter(b => 
-      b.plateformeReservation === PlateformeReservation.Directe
+      b.reservationPlatform === PlateformeReservation.Directe
     );
     
     // Mettre à jour synced_at pour les réservations locales synchronisées
@@ -247,17 +247,17 @@ export async function loadBookingsForAccommodation(
     // Elles ne sont PAS stockées dans la DB, seulement marquées avec isObsolete: true
     
     // Fusionner les réservations
-    const mergedBookings: BookingDisplay[] = [];
+    const mergedBookings: IBookingDisplay[] = [];
     const processedLocalIds = new Set<string>();
     
     // D'abord, ajouter toutes les réservations OpenPro
     for (const openProBooking of bookings) {
-      if (openProBooking.plateformeReservation === PlateformeReservation.Directe) {
+      if (openProBooking.reservationPlatform === PlateformeReservation.Directe) {
         // Vérifier si cette réservation Direct correspond à une réservation locale
         const localMatch = localBookings.find(localBooking =>
-          localBooking.idHebergement === openProBooking.idHebergement &&
-          localBooking.dateArrivee === openProBooking.dateArrivee &&
-          localBooking.dateDepart === openProBooking.dateDepart
+          localBooking.accommodationId === openProBooking.accommodationId &&
+          localBooking.arrivalDate === openProBooking.arrivalDate &&
+          localBooking.departureDate === openProBooking.departureDate
         );
         
         if (localMatch) {
@@ -268,7 +268,7 @@ export async function loadBookingsForAccommodation(
             isObsolete: false
           });
           // Marquer la réservation locale comme traitée
-          processedLocalIds.add(`${localMatch.idHebergement}-${localMatch.dateArrivee}-${localMatch.dateDepart}`);
+          processedLocalIds.add(`${localMatch.accommodationId}-${localMatch.arrivalDate}-${localMatch.departureDate}`);
         } else {
           // Réservation Direct dans OpenPro sans correspondance locale = obsolète
           mergedBookings.push({
@@ -285,7 +285,7 @@ export async function loadBookingsForAccommodation(
     
     // Ensuite, ajouter les réservations locales qui n'ont pas de correspondance OpenPro
     for (const localBooking of localBookings) {
-      const localId = `${localBooking.idHebergement}-${localBooking.dateArrivee}-${localBooking.dateDepart}`;
+      const localId = `${localBooking.accommodationId}-${localBooking.arrivalDate}-${localBooking.departureDate}`;
       if (!processedLocalIds.has(localId)) {
         // Pas de correspondance OpenPro, ajouter avec isPendingSync: true
         mergedBookings.push({
@@ -302,7 +302,7 @@ export async function loadBookingsForAccommodation(
   // Si pas de réservations locales, toutes les réservations Direct depuis OpenPro sont obsolètes
   // (elles n'ont pas de correspondance locale dans la DB)
   return bookings.map(booking => {
-    if (booking.plateformeReservation === PlateformeReservation.Directe) {
+    if (booking.reservationPlatform === PlateformeReservation.Directe) {
       return {
         ...booking,
         isPendingSync: false,
@@ -312,4 +312,3 @@ export async function loadBookingsForAccommodation(
     return booking; // Les réservations non-Directe restent inchangées
   });
 }
-

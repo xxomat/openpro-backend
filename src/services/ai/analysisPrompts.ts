@@ -5,7 +5,7 @@
  * pour analyser les réservations et générer des suggestions de tarifs.
  */
 
-import type { SuggestionRequest } from '../../types/suggestions.js';
+import type { ISuggestionRequest } from '../../types/suggestions.js';
 
 /**
  * Génère le prompt pour l'analyse des réservations et génération de suggestions
@@ -13,16 +13,16 @@ import type { SuggestionRequest } from '../../types/suggestions.js';
  * @param request - Données de la requête d'analyse
  * @returns Prompt formaté pour l'IA
  */
-export function generateAnalysisPrompt(request: SuggestionRequest): string {
+export function generateAnalysisPrompt(request: ISuggestionRequest): string {
   return `Tu es un expert en revenue management pour des hébergements touristiques.
 
 Analyse les données suivantes et suggère des ajustements de tarifs et/ou de durées minimales de séjour :
 
-**Hébergement:** Fournisseur ${request.idFournisseur}, Hébergement ${request.idHebergement}
+**Hébergement:** Fournisseur ${request.supplierId}, Hébergement ${request.accommodationId}
 
 **Réservations récentes (${request.recentBookings.length}):**
 ${request.recentBookings.map(b => 
-  `- Dossier ${b.idDossier}: ${b.dateArrivee} → ${b.dateDepart}, montant: ${b.montant}€`
+  `- Dossier ${b.bookingId}: ${b.arrivalDate} → ${b.departureDate}, montant: ${b.amount}€`
 ).join('\n')}
 
 **Tarifs actuels (échantillon):**

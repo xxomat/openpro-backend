@@ -19,7 +19,9 @@
     "@ai-sdk/anthropic": "^2.0.45",
     "@ai-sdk/openai": "^2.0.69",
     "ai": "^5.0.97",
+    "class-transformer": "^0.5.1",
     "itty-router": "^5.0.18",
+    "reflect-metadata": "^0.2.2",
     "zod": "^3.22.4"
   },
   "devDependencies": {

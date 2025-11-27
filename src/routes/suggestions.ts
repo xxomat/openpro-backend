@@ -12,6 +12,7 @@ import { generatePricingSuggestions } from '../services/ai/suggestionEngine.js';
 import { saveSuggestions } from '../services/ai/suggestionStorage.js';
 import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
+import type { ISuggestionRequest } from '../types/suggestions.js';
 
 /**
  * Normalise les données de tarifs depuis l'API vers un format simplifié
@@ -155,9 +156,9 @@ export function suggestionsRouter(router: Router, env: Env, ctx: RequestContext)
       ]);
       
       // Préparer la requête d'analyse
-      const analysisRequest = {
-        idFournisseur,
-        idHebergement,
+      const analysisRequest: ISuggestionRequest = {
+        supplierId: idFournisseur,
+        accommodationId: idHebergement,
         recentBookings: [],
         currentRates: normalizeRates(rates),
         currentStock: normalizeStock(stock),

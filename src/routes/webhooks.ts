@@ -11,7 +11,7 @@ import { getOpenProClient } from '../services/openProClient.js';
 import { generatePricingSuggestions } from '../services/ai/suggestionEngine.js';
 import { saveSuggestions } from '../services/ai/suggestionStorage.js';
 import { createLogger } from '../index.js';
-import type { BookingAnalysis } from '../types/suggestions.js';
+import type { IBookingAnalysis, ISuggestionRequest } from '../types/suggestions.js';
 
 /**
  * Normalise les données de tarifs depuis l'API vers un format simplifié
@@ -65,10 +65,10 @@ function normalizeStock(stock: unknown): Record<string, number> {
  * Charge les réservations récentes pour un hébergement
  */
 async function loadRecentBookings(
-  idFournisseur: number,
-  idHebergement: number,
+  supplierId: number,
+  accommodationId: number,
   env: Env
-): Promise<BookingAnalysis[]> {
+): Promise<IBookingAnalysis[]> {
   // TODO: Charger depuis D1 les réservations locales + OpenPro
   return [];
 }
@@ -117,18 +117,18 @@ export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
       ]);
       
       // Préparer les données pour l'analyse
-      const analysisRequest = {
-        idFournisseur: booking.idFournisseur,
-        idHebergement: booking.idHebergement,
+      const analysisRequest: ISuggestionRequest = {
+        supplierId: booking.idFournisseur,
+        accommodationId: booking.idHebergement,
         recentBookings: [
           ...recentBookings,
           {
-            idDossier: booking.idDossier,
-            idFournisseur: booking.idFournisseur,
-            idHebergement: booking.idHebergement,
-            dateArrivee: booking.dateArrivee,
-            dateDepart: booking.dateDepart,
-            montant: booking.montant,
+            bookingId: booking.idDossier,
+            supplierId: booking.idFournisseur,
+            accommodationId: booking.idHebergement,
+            arrivalDate: booking.dateArrivee,
+            departureDate: booking.dateDepart,
+            amount: booking.montant,
             timestamp: new Date()
           }
         ],

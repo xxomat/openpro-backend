@@ -1,28 +1,31 @@
 /**
  * Types pour le service de suggestions IA
  * 
- * Ce fichier contient les types utilisés pour le système de suggestions
+ * Ce fichier contient les interfaces utilisées pour le système de suggestions
  * de tarifs et durées minimales basé sur l'analyse IA des réservations.
+ * 
+ * Convention : Toutes les interfaces sont préfixées avec "I" (ex: IBookingAnalysis)
+ * Les propriétés utilisent des noms camelCase en anglais.
  */
 
-export interface BookingAnalysis {
-  idDossier: number;
-  idFournisseur: number;
-  idHebergement: number;
-  dateArrivee: string;
-  dateDepart: string;
-  montant: number;
+export interface IBookingAnalysis {
+  bookingId: number;
+  supplierId: number;
+  accommodationId: number;
+  arrivalDate: string;
+  departureDate: string;
+  amount: number;
   timestamp: Date;
 }
 
-export interface PricingSuggestion {
+export interface IPricingSuggestion {
   id: string;
   type: 'rate_increase' | 'rate_decrease' | 'min_stay_increase' | 'min_stay_decrease';
-  idFournisseur: number;
-  idHebergement: number;
-  idTypeTarif?: number;
-  dateDebut: string;
-  dateFin: string;
+  supplierId: number;
+  accommodationId: number;
+  rateTypeId?: number;
+  startDate: string;
+  endDate: string;
   currentValue: number;
   suggestedValue: number;
   confidence: number;
@@ -31,12 +34,11 @@ export interface PricingSuggestion {
   status: 'pending' | 'applied' | 'rejected';
 }
 
-export interface SuggestionRequest {
-  idFournisseur: number;
-  idHebergement: number;
-  recentBookings: BookingAnalysis[];
+export interface ISuggestionRequest {
+  supplierId: number;
+  accommodationId: number;
+  recentBookings: IBookingAnalysis[];
   currentRates: Record<string, number>;
   currentStock: Record<string, number>;
   historicalData?: unknown;
 }
-

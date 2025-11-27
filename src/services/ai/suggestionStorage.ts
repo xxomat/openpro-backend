@@ -4,7 +4,7 @@
  * Ce fichier gère le stockage des suggestions générées par l'IA dans D1 (SQLite).
  */
 
-import type { PricingSuggestion } from '../../types/suggestions.js';
+import type { IPricingSuggestion } from '../../types/suggestions.js';
 import type { Env } from '../../index.js';
 
 /**
@@ -13,7 +13,7 @@ import type { Env } from '../../index.js';
  * @param suggestions - Liste des suggestions à sauvegarder
  * @param env - Variables d'environnement Workers
  */
-export async function saveSuggestions(suggestions: PricingSuggestion[], env: Env): Promise<void> {
+export async function saveSuggestions(suggestions: IPricingSuggestion[], env: Env): Promise<void> {
   if (!suggestions || suggestions.length === 0) {
     return;
   }
@@ -28,12 +28,12 @@ export async function saveSuggestions(suggestions: PricingSuggestion[], env: Env
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       suggestion.id,
-      suggestion.idFournisseur,
-      suggestion.idHebergement,
+      suggestion.supplierId,
+      suggestion.accommodationId,
       'pricing', // Type de suggestion
       suggestion.status,
       JSON.stringify(suggestion), // Stocker toute la suggestion en JSON
-      suggestion.rationale || null,
+      suggestion.reasoning || null,
       suggestion.confidence || null,
       suggestion.createdAt.toISOString(),
       suggestion.createdAt.toISOString()
@@ -56,7 +56,7 @@ export async function getSuggestionsBySupplier(
   idFournisseur: number,
   status: 'pending' | 'applied' | 'rejected' | undefined,
   env: Env
-): Promise<PricingSuggestion[]> {
+): Promise<IPricingSuggestion[]> {
   let query = `
     SELECT * FROM ai_suggestions
     WHERE id_fournisseur = ?
@@ -76,13 +76,13 @@ export async function getSuggestionsBySupplier(
     return [];
   }
   
-  // Convertir les résultats en PricingSuggestion
+  // Convertir les résultats en IPricingSuggestion
   return result.results.map((row: any) => {
     const suggestionData = JSON.parse(row.suggested_data);
     return {
       ...suggestionData,
       createdAt: new Date(row.date_created)
-    } as PricingSuggestion;
+    } as IPricingSuggestion;
   });
 }
 
@@ -98,7 +98,7 @@ export async function updateSuggestionStatus(
   id: string,
   status: 'applied' | 'rejected',
   env: Env
-): Promise<PricingSuggestion | null> {
+): Promise<IPricingSuggestion | null> {
   // Vérifier que la suggestion existe
   const existing = await env.DB.prepare(`
     SELECT suggested_data FROM ai_suggestions WHERE id = ?
@@ -129,5 +129,5 @@ export async function updateSuggestionStatus(
     ...suggestionData,
     status,
     createdAt: new Date((updated as any).date_created)
-  } as PricingSuggestion;
+  } as IPricingSuggestion;
 }

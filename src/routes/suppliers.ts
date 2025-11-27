@@ -455,7 +455,7 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       // Traiter chaque hébergement
       for (const accommodation of bulkData.accommodations) {
         logger.info('Processing accommodation', {
-          accommodationId: accommodation.idHebergement,
+          accommodationId: accommodation.accommodationId,
           datesCount: accommodation.dates.length
         });
         
@@ -463,22 +463,22 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
         
         if (requeteTarif !== null && requeteTarif.tarifs.length > 0) {
           logger.info('Calling OpenPro API setRates', {
-            accommodationId: accommodation.idHebergement,
+            accommodationId: accommodation.accommodationId,
             tarifsCount: requeteTarif.tarifs.length
           });
           
           await openProClient.setRates(
             idFournisseur,
-            accommodation.idHebergement,
+            accommodation.accommodationId,
             requeteTarif
           );
           
           logger.info('Successfully called OpenPro API setRates', {
-            accommodationId: accommodation.idHebergement
+            accommodationId: accommodation.accommodationId
           });
         } else {
           logger.warn('Skipping accommodation: no valid tarifs to update', {
-            accommodationId: accommodation.idHebergement
+            accommodationId: accommodation.accommodationId
           });
         }
       }
@@ -503,15 +503,23 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     let bookingData: {
-      idHebergement: number;
-      dateArrivee: string;
-      dateDepart: string;
-      clientNom?: string;
-      clientPrenom?: string;
+      accommodationId?: number;
+      idHebergement?: number; // Support ancien format pour compatibilité
+      arrivalDate?: string;
+      dateArrivee?: string; // Support ancien format pour compatibilité
+      departureDate?: string;
+      dateDepart?: string; // Support ancien format pour compatibilité
+      clientName?: string;
+      clientNom?: string; // Support ancien format pour compatibilité
+      clientFirstName?: string;
+      clientPrenom?: string; // Support ancien format pour compatibilité
       clientEmail?: string;
-      clientTelephone?: string;
-      nbPersonnes?: number;
-      montantTotal?: number;
+      clientPhone?: string;
+      clientTelephone?: string; // Support ancien format pour compatibilité
+      numberOfPersons?: number;
+      nbPersonnes?: number; // Support ancien format pour compatibilité
+      totalAmount?: number;
+      montantTotal?: number; // Support ancien format pour compatibilité
       reference?: string;
     };
     
@@ -521,26 +529,38 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       return errorResponse('Invalid JSON body', 400);
     }
     
+    // Normaliser les noms (support des anciens et nouveaux formats)
+    const accommodationId = bookingData.accommodationId ?? bookingData.idHebergement;
+    const arrivalDate = bookingData.arrivalDate ?? bookingData.dateArrivee;
+    const departureDate = bookingData.departureDate ?? bookingData.dateDepart;
+    const clientName = bookingData.clientName ?? bookingData.clientNom;
+    const clientFirstName = bookingData.clientFirstName ?? bookingData.clientPrenom;
+    const clientEmail = bookingData.clientEmail;
+    const clientPhone = bookingData.clientPhone ?? bookingData.clientTelephone;
+    const numberOfPersons = bookingData.numberOfPersons ?? bookingData.nbPersonnes;
+    const totalAmount = bookingData.totalAmount ?? bookingData.montantTotal;
+    const reference = bookingData.reference;
+    
     // Valider les champs obligatoires
-    if (!bookingData.idHebergement || !bookingData.dateArrivee || !bookingData.dateDepart) {
-      return errorResponse('Missing required fields: idHebergement, dateArrivee, dateDepart', 400);
+    if (!accommodationId || !arrivalDate || !departureDate) {
+      return errorResponse('Missing required fields: accommodationId (or idHebergement), arrivalDate (or dateArrivee), departureDate (or dateDepart)', 400);
     }
     
     // Valider les types
-    if (typeof bookingData.idHebergement !== 'number') {
-      return errorResponse('idHebergement must be a number', 400);
+    if (typeof accommodationId !== 'number') {
+      return errorResponse('accommodationId (or idHebergement) must be a number', 400);
     }
     
     // Valider le format des dates (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(bookingData.dateArrivee) || !dateRegex.test(bookingData.dateDepart)) {
+    if (!dateRegex.test(arrivalDate) || !dateRegex.test(departureDate)) {
       return errorResponse('Dates must be in YYYY-MM-DD format', 400);
     }
     
     try {
       // Séparer le nom complet en nom et prénom si nécessaire
-      let clientNom = bookingData.clientNom;
-      let clientPrenom = bookingData.clientPrenom;
+      let clientNom = clientName;
+      let clientPrenom = clientFirstName;
       
       // Si on a seulement clientNom (nom complet), essayer de le séparer
       if (clientNom && !clientPrenom) {
@@ -560,12 +580,12 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       // Si cela échoue, la réservation ne sera pas créée
       const openProClient = getOpenProClient(env);
       
-      // Calculer toutes les dates entre dateArrivee (inclus) et dateDepart (exclus)
+      // Calculer toutes les dates entre arrivalDate (inclus) et departureDate (exclus)
       // Le stock doit être à 0 du premier jour inclus au dernier jour inclus
-      // dateDepart est exclu car c'est la date de départ (dernière nuit = dateDepart - 1 jour)
+      // departureDate est exclu car c'est la date de départ (dernière nuit = departureDate - 1 jour)
       const dates: string[] = [];
-      const [startYear, startMonth, startDay] = bookingData.dateArrivee.split('-').map(Number);
-      const [endYear, endMonth, endDay] = bookingData.dateDepart.split('-').map(Number);
+      const [startYear, startMonth, startDay] = arrivalDate.split('-').map(Number);
+      const [endYear, endMonth, endDay] = departureDate.split('-').map(Number);
       
       // Créer des dates en locale pour éviter les problèmes de fuseau horaire
       let currentDate = new Date(startYear, startMonth - 1, startDay);
@@ -592,28 +612,28 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       // Mettre à jour le stock dans OpenPro (si cela échoue, la création de réservation échouera aussi)
       await openProClient.updateStock(
         idFournisseur,
-        bookingData.idHebergement,
+        accommodationId,
         stockPayload
       );
       
-      logger.info(`Updated stock to 0 for supplier ${idFournisseur}, accommodation ${bookingData.idHebergement}, dates ${dates[0]} to ${dates[dates.length - 1]}`);
+      logger.info(`Updated stock to 0 for supplier ${idFournisseur}, accommodation ${accommodationId}, dates ${dates[0]} to ${dates[dates.length - 1]}`);
       
       // Créer la réservation en DB seulement si la mise à jour du stock a réussi
       const createdBooking = await createLocalBooking({
-        idFournisseur,
-        idHebergement: bookingData.idHebergement,
-        dateArrivee: bookingData.dateArrivee,
-        dateDepart: bookingData.dateDepart,
-        clientNom,
-        clientPrenom,
-        clientEmail: bookingData.clientEmail,
-        clientTelephone: bookingData.clientTelephone,
-        nbPersonnes: bookingData.nbPersonnes,
-        montantTotal: bookingData.montantTotal,
-        reference: bookingData.reference
+        supplierId: idFournisseur,
+        accommodationId: accommodationId,
+        arrivalDate: arrivalDate,
+        departureDate: departureDate,
+        clientName: clientNom,
+        clientFirstName: clientPrenom,
+        clientEmail: clientEmail,
+        clientPhone: clientPhone,
+        numberOfPersons: numberOfPersons,
+        totalAmount: totalAmount,
+        reference: reference
       }, env);
       
-      logger.info(`Created local booking for supplier ${idFournisseur}, accommodation ${bookingData.idHebergement}`);
+      logger.info(`Created local booking for supplier ${idFournisseur}, accommodation ${accommodationId}`);
       
       // Synchroniser avec le stub-server en mode test (non bloquant)
       try {

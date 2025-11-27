@@ -7,27 +7,28 @@
 
 import { getOpenProClient } from '../openProClient.js';
 import type { Env } from '../../index.js';
-import type { Accommodation, RateType } from '../../types/api.js';
-import type { AccommodationRateTypeLink, AccommodationRateTypeLinksResponse, ApiRateType, ApiTarif, RateTypeListResponse } from '../../types/apiTypes.js';
+import type { IAccommodation, IRateType } from '../../types/api.js';
+import type { IApiRateType, IApiTarif, IRateTypeListResponse } from '../../types/apiTypes.js';
 import { extractFrenchText } from './utils/rateUtils.js';
+import { transformRateTypeListResponse } from '../../utils/transformers.js';
 
 /**
  * Type interne pour représenter un type de tarif découvert lors du chargement
  * 
  * Ce type est utilisé pour accumuler les informations sur les types de tarifs
- * trouvés dans les réponses API, avant de les convertir en format interne RateType.
+ * trouvés dans les réponses API, avant de les convertir en format interne IRateType.
  */
 export type DiscoveredRateType = {
   /** Identifiant unique du type de tarif */
-  idTypeTarif: number;
+  rateTypeId: number;
   /** Libellé brut de l'API (peut être multilingue) */
-  libelle?: unknown;
+  label?: unknown;
   /** Libellé français extrait et normalisé */
-  label?: string;
+  labelFr?: string;
   /** Description française extraite et normalisée */
   descriptionFr?: string;
   /** Ordre d'affichage du type de tarif */
-  ordre?: number;
+  order?: number;
 };
 
 /**
@@ -40,13 +41,13 @@ export type DiscoveredRateType = {
  * @param idFournisseur - Identifiant du fournisseur
  * @param accommodationsList - Liste des hébergements pour déterminer les types de tarifs liés
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
- * @returns Map des types de tarifs découverts, indexée par idTypeTarif
+ * @returns Map des types de tarifs découverts, indexée par rateTypeId
  * @throws {Error} Peut lever une erreur si le chargement des types de tarifs échoue
  * @throws {DOMException} Peut lever une AbortError si la requête est annulée
  */
 export async function loadRateTypes(
   idFournisseur: number,
-  accommodationsList: Accommodation[],
+  accommodationsList: IAccommodation[],
   env: Env,
   signal?: AbortSignal
 ): Promise<Map<number, DiscoveredRateType>> {
@@ -60,25 +61,27 @@ export async function loadRateTypes(
     const openProClient = getOpenProClient(env);
     const allRateTypesResponse = await openProClient.listRateTypes(idFournisseur);
     if (signal?.aborted) throw new Error('Cancelled');
-    const apiRateTypesResponse = allRateTypesResponse as unknown as RateTypeListResponse;
-    const allRateTypes: ApiRateType[] = apiRateTypesResponse.typeTarifs ?? [];
+    
+    // Transformer la réponse avec class-transformer
+    const apiRateTypesResponse = transformRateTypeListResponse(allRateTypesResponse);
+    const allRateTypes = apiRateTypesResponse.rateTypes ?? [];
     
     // Retourner TOUS les types de tarif, pas seulement ceux liés
     // Cela permet d'afficher tous les types de tarif dans le sélecteur principal
     for (const rateType of allRateTypes) {
-      const id = Number(rateType.cleTypeTarif?.idTypeTarif ?? rateType.idTypeTarif);
+      const id = rateType.rateTypeKey?.rateTypeId ?? rateType.rateTypeId;
       
       if (id) {
         const descriptionFr = extractFrenchText(rateType.description);
-        const libelleFr = extractFrenchText(rateType.libelle);
+        const labelFr = extractFrenchText(rateType.label);
         
         if (!discoveredRateTypes.has(id)) {
           discoveredRateTypes.set(id, {
-            idTypeTarif: id,
-            libelle: rateType.libelle,
-            label: libelleFr,
-            descriptionFr: descriptionFr ?? libelleFr,
-            ordre: rateType.ordre
+            rateTypeId: id,
+            label: rateType.label,
+            labelFr: labelFr,
+            descriptionFr: descriptionFr ?? labelFr,
+            order: rateType.order
           });
         }
       }
@@ -99,32 +102,32 @@ export async function loadRateTypes(
  * a une description générique (commençant par "Type "), la description est mise à jour.
  * 
  * @param discoveredRateTypes - Map des types de tarifs déjà découverts (sera modifiée)
- * @param tarif - Objet tarif brut de l'API
- * @param idType - Identifiant du type de tarif
+ * @param tarif - Objet tarif transformé avec interface IApiTarif
+ * @param rateTypeId - Identifiant du type de tarif
  * @param rateLabel - Libellé du tarif déjà extrait
  */
 export function updateDiscoveredRateTypes(
   discoveredRateTypes: Map<number, DiscoveredRateType>,
-  tarif: ApiTarif,
-  idType: number,
+  tarif: IApiTarif,
+  rateTypeId: number,
   rateLabel: string | undefined
 ): void {
-  if (!discoveredRateTypes.has(idType)) {
-    const descriptionFr = extractFrenchText(tarif?.typeTarif?.description ?? tarif?.description);
-    const ordre = tarif?.typeTarif?.ordre ?? tarif?.ordre;
+  if (!discoveredRateTypes.has(rateTypeId)) {
+    const descriptionFr = extractFrenchText(tarif?.rateType?.description ?? tarif?.description);
+    const order = tarif?.rateType?.order ?? tarif?.order;
     
-    discoveredRateTypes.set(idType, {
-      idTypeTarif: idType,
-      libelle: tarif?.typeTarif?.libelle ?? tarif?.libelle,
-      label: rateLabel,
-      descriptionFr: descriptionFr ?? rateLabel ?? `Type ${idType}`,
-      ordre: ordre != null ? Number(ordre) : undefined
+    discoveredRateTypes.set(rateTypeId, {
+      rateTypeId: rateTypeId,
+      label: tarif?.rateType?.label ?? tarif?.label,
+      labelFr: rateLabel,
+      descriptionFr: descriptionFr ?? rateLabel ?? `Type ${rateTypeId}`,
+      order: order != null ? Number(order) : undefined
     });
   } else {
     // Mettre à jour la description si elle manque ou est générique
-    const existing = discoveredRateTypes.get(idType)!;
+    const existing = discoveredRateTypes.get(rateTypeId)!;
     if (!existing.descriptionFr || existing.descriptionFr.startsWith('Type ')) {
-      const descriptionFr = extractFrenchText(tarif?.typeTarif?.description ?? tarif?.description);
+      const descriptionFr = extractFrenchText(tarif?.rateType?.description ?? tarif?.description);
       if (descriptionFr) {
         existing.descriptionFr = descriptionFr;
       }
@@ -136,7 +139,7 @@ export function updateDiscoveredRateTypes(
  * Construit les structures finales de types de tarifs à partir de la map des types découverts
  * 
  * Cette fonction transforme la map des types découverts en deux structures :
- * - Une map de labels indexée par idTypeTarif pour un accès rapide
+ * - Une map de labels indexée par rateTypeId pour un accès rapide
  * - Une liste triée par ordre pour l'affichage dans les dropdowns
  * 
  * @param discoveredRateTypes - Map des types de tarifs découverts
@@ -144,29 +147,28 @@ export function updateDiscoveredRateTypes(
  */
 export function buildRateTypesList(discoveredRateTypes: Map<number, DiscoveredRateType>): {
   rateTypeLabels: Record<number, string>;
-  rateTypesList: RateType[];
+  rateTypesList: IRateType[];
 } {
   const rateTypeLabels: Record<number, string> = {};
-  const rateTypesList: RateType[] = [];
+  const rateTypesList: IRateType[] = [];
   
   for (const [id, info] of discoveredRateTypes) {
-    const displayLabel = info.descriptionFr ?? info.label ?? `Type ${id}`;
+    const displayLabel = info.descriptionFr ?? info.labelFr ?? `Type ${id}`;
     rateTypeLabels[id] = displayLabel;
     rateTypesList.push({
-      idTypeTarif: info.idTypeTarif,
-      libelle: info.libelle,
+      rateTypeId: info.rateTypeId,
+      label: info.label,
       descriptionFr: info.descriptionFr,
-      ordre: info.ordre
+      order: info.order
     });
   }
   
   // Trier par ordre (999 par défaut si non défini)
   rateTypesList.sort((a, b) => {
-    const ordreA = a.ordre ?? 999;
-    const ordreB = b.ordre ?? 999;
-    return ordreA - ordreB;
+    const orderA = a.order ?? 999;
+    const orderB = b.order ?? 999;
+    return orderA - orderB;
   });
   
   return { rateTypeLabels, rateTypesList };
 }
-
