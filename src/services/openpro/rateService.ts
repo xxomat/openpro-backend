@@ -8,11 +8,12 @@
 
 import { getOpenProClient } from '../openProClient.js';
 import type { Env } from '../../index.js';
-import type { ApiTarif, RatesResponse } from '../../types/apiTypes.js';
+import type { IApiTarif, IRatesResponse } from '../../types/apiTypes.js';
 import type { DiscoveredRateType } from './rateTypeService.js';
 import { formatDate } from '../../utils/dateUtils.js';
 import { extractPriceFromTarif, extractRateLabel } from './utils/rateUtils.js';
 import { updateDiscoveredRateTypes } from './rateTypeService.js';
+import { transformRatesResponse } from '../../utils/transformers.js';
 
 /**
  * Traite un tarif individuel et met à jour les maps de tarifs, promotions, types et durées minimales
@@ -22,17 +23,18 @@ import { updateDiscoveredRateTypes } from './rateTypeService.js';
  * deux cas : avec prix valide (met à jour tout) ou sans prix (met à jour seulement
  * les durées minimales).
  * 
- * @param tarif - Objet tarif brut de l'API
+ * @param tarif - Objet tarif transformé avec interface IApiTarif
  * @param debut - Date de début demandée au format YYYY-MM-DD
  * @param fin - Date de fin demandée au format YYYY-MM-DD
  * @param mapRates - Map des tarifs par date et type (sera modifiée)
  * @param mapPromo - Map des promotions par date (sera modifiée)
  * @param mapRateTypes - Map des types de tarifs par date (sera modifiée)
  * @param mapDureeMin - Map des durées minimales par date et type de tarif (sera modifiée)
+ * @param mapArriveeAutorisee - Map des arrivées autorisées par date et type de tarif (sera modifiée)
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
  */
 function processTarif(
-  tarif: ApiTarif,
+  tarif: IApiTarif,
   debut: string,
   fin: string,
   mapRates: Record<string, Record<number, number>>,
@@ -42,22 +44,23 @@ function processTarif(
   mapArriveeAutorisee: Record<string, Record<number, boolean>>,
   discoveredRateTypes: Map<number, DiscoveredRateType>
 ): void {
-  // Lire les dates du tarif (gérer le cas où "fin " a un espace à la fin)
-  // IMPORTANT : Ne pas utiliser les paramètres debut/fin comme fallback car chaque tarif
-  // doit avoir ses propres dates explicites dans la réponse API
+  // Lire les dates du tarif (utiliser les noms camelCase)
   // L'API peut retourner "fin " avec un espace comme clé de propriété, donc on doit chercher
   // dans toutes les clés de l'objet pour trouver "fin" ou "fin "
-  const deb = String(tarif.debut ?? tarif.dateDebut ?? '').trim();
+  const deb = String(tarif.startDate ?? tarif.startDateAlt ?? '').trim();
   // Chercher "fin" dans les clés de l'objet (peut être "fin" ou "fin " avec espace)
+  // Note: Après transformation, on utilise endDate, mais on doit aussi gérer le JSON brut
   const fe = String(
-    tarif.fin ?? 
-    tarif.dateFin ?? 
+    tarif.endDate ?? 
+    tarif.endDateAlt ?? 
+    (tarif as any)['fin'] ?? 
     (tarif as any)['fin '] ?? 
+    (tarif as any)['dateFin'] ?? 
     (tarif as any)['dateFin '] ?? 
     ''
   ).trim();
   
-  // Si le tarif n'a pas de dates explicites, ignorer (ne pas utiliser debut/fin comme fallback)
+  // Si le tarif n'a pas de dates explicites, ignorer
   if (!deb || !fe) {
     return;
   }
@@ -82,7 +85,8 @@ function processTarif(
   const actualStart = startD > requestedStart ? startD : requestedStart;
   const actualEnd = endD < requestedEnd ? endD : requestedEnd;
   
-  const idType = Number(tarif.idTypeTarif ?? tarif?.typeTarif?.idTypeTarif);
+  const rateTypeId = tarif.rateTypeId ?? tarif?.rateType?.rateTypeId;
+  const idType = rateTypeId ? Number(rateTypeId) : undefined;
   const price = extractPriceFromTarif(tarif);
   const rateLabel = extractRateLabel(tarif, idType);
   const tHasPromo =
@@ -90,11 +94,11 @@ function processTarif(
     Boolean(tarif?.promo) ||
     Boolean(tarif?.promotionActive) ||
     Boolean(tarif?.hasPromo);
-  const dureeMinValue = tarif.dureeMin != null && typeof tarif.dureeMin === 'number' && tarif.dureeMin > 0 
-    ? tarif.dureeMin 
+  const minDurationValue = tarif.minDuration != null && typeof tarif.minDuration === 'number' && tarif.minDuration > 0 
+    ? tarif.minDuration 
     : null;
-  const arriveeAutoriseeValue = tarif.arriveeAutorisee !== undefined 
-    ? Boolean(tarif.arriveeAutorisee) 
+  const arrivalAllowedValue = tarif.arrivalAllowed !== undefined 
+    ? Boolean(tarif.arrivalAllowed) 
     : true; // Par défaut true si non défini
   
   // Mettre à jour les types de tarifs découverts
@@ -127,18 +131,18 @@ function processTarif(
         }
       }
       
-      if (dureeMinValue != null && idType) {
+      if (minDurationValue != null && idType) {
         if (!mapDureeMin[key]) {
           mapDureeMin[key] = {};
         }
-        mapDureeMin[key][idType] = dureeMinValue;
+        mapDureeMin[key][idType] = minDurationValue;
       }
       
       if (idType) {
         if (!mapArriveeAutorisee[key]) {
           mapArriveeAutorisee[key] = {};
         }
-        mapArriveeAutorisee[key][idType] = arriveeAutoriseeValue;
+        mapArriveeAutorisee[key][idType] = arrivalAllowedValue;
       }
       
       cur.setDate(cur.getDate() + 1);
@@ -148,17 +152,17 @@ function processTarif(
     const cur = new Date(actualStart);
     while (cur <= actualEnd) {
       const key = formatDate(cur);
-      if (dureeMinValue != null && idType) {
+      if (minDurationValue != null && idType) {
         if (!mapDureeMin[key]) {
           mapDureeMin[key] = {};
         }
-        mapDureeMin[key][idType] = dureeMinValue;
+        mapDureeMin[key][idType] = minDurationValue;
       }
       if (idType) {
         if (!mapArriveeAutorisee[key]) {
           mapArriveeAutorisee[key] = {};
         }
-        mapArriveeAutorisee[key][idType] = arriveeAutoriseeValue;
+        mapArriveeAutorisee[key][idType] = arrivalAllowedValue;
       }
       cur.setDate(cur.getDate() + 1);
     }
@@ -176,6 +180,7 @@ function processTarif(
  * @param debut - Date de début au format YYYY-MM-DD
  * @param fin - Date de fin au format YYYY-MM-DD
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
+ * @param env - Variables d'environnement Workers
  * @param signal - Signal d'annulation optionnel pour interrompre la requête
  * @returns Objet contenant les maps de tarifs, promotions, types et durées minimales
  * @throws {Error} Peut lever une erreur si le chargement des tarifs échoue
@@ -207,8 +212,15 @@ export async function loadRatesForAccommodation(
   const mapDureeMin: Record<string, Record<number, number | null>> = {};
   const mapArriveeAutorisee: Record<string, Record<number, boolean>> = {};
   
-  const apiResponse = rates as unknown as RatesResponse;
-  const tarifs: ApiTarif[] = apiResponse.tarifs ?? apiResponse.periodes ?? [];
+  // L'API OpenPro retourne { ok: 1, data: { tarifs: [...] } }
+  // Il faut transformer data au lieu de la réponse complète
+  const dataToTransform = (rates && typeof rates === 'object' && 'data' in rates && rates.data) 
+    ? rates.data 
+    : rates;
+  
+  // Transformer la réponse avec class-transformer
+  const apiResponse = transformRatesResponse(dataToTransform);
+  const tarifs = apiResponse.rates ?? apiResponse.periods ?? [];
   
   for (const tarif of tarifs) {
     processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, mapArriveeAutorisee, discoveredRateTypes);
@@ -222,4 +234,3 @@ export async function loadRatesForAccommodation(
     arriveeAutorisee: mapArriveeAutorisee
   };
 }
-

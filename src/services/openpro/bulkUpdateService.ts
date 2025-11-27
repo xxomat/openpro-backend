@@ -14,15 +14,17 @@ export interface BulkUpdateDate {
   date: string;              // YYYY-MM-DD
   rateTypeId?: number;       // présent si tarif modifié
   price?: number;            // présent si tarif modifié
-  dureeMin?: number | null;  // présent si dureeMin modifiée
-  arriveeAutorisee?: boolean; // présent si arriveeAutorisee modifié
+  minDuration?: number | null;  // présent si minDuration modifiée (nouveau format)
+  dureeMin?: number | null;  // présent si dureeMin modifiée (ancien format, pour compatibilité)
+  arrivalAllowed?: boolean; // présent si arrivalAllowed modifié (nouveau format)
+  arriveeAutorisee?: boolean; // présent si arriveeAutorisee modifié (ancien format, pour compatibilité)
 }
 
 /**
  * Type pour un hébergement avec ses dates modifiées
  */
 export interface BulkUpdateAccommodation {
-  idHebergement: number;
+  accommodationId: number;
   dates: BulkUpdateDate[];
 }
 
@@ -68,7 +70,11 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
   } | null = null;
   
   for (const date of dates) {
-    const key = `${date.rateTypeId ?? 'none'}-${date.price ?? 'none'}-${date.dureeMin ?? 'none'}-${date.arriveeAutorisee ?? 'none'}`;
+    // Normaliser les noms (accepter les deux formats)
+    const dureeMin = date.minDuration ?? date.dureeMin;
+    const arriveeAutorisee = date.arrivalAllowed ?? date.arriveeAutorisee;
+    
+    const key = `${date.rateTypeId ?? 'none'}-${date.price ?? 'none'}-${dureeMin ?? 'none'}-${arriveeAutorisee ?? 'none'}`;
     
     if (currentPeriod === null) {
       // Démarrer une nouvelle période
@@ -77,8 +83,8 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
         fin: date.date,
         rateTypeId: date.rateTypeId,
         price: date.price,
-        dureeMin: date.dureeMin,
-        arriveeAutorisee: date.arriveeAutorisee
+        dureeMin: dureeMin,
+        arriveeAutorisee: arriveeAutorisee
       };
     } else {
       const currentKey = `${currentPeriod.rateTypeId ?? 'none'}-${currentPeriod.price ?? 'none'}-${currentPeriod.dureeMin ?? 'none'}-${currentPeriod.arriveeAutorisee ?? 'none'}`;
@@ -95,8 +101,8 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
           fin: date.date,
           rateTypeId: date.rateTypeId,
           price: date.price,
-          dureeMin: date.dureeMin,
-          arriveeAutorisee: date.arriveeAutorisee
+          dureeMin: dureeMin,
+          arriveeAutorisee: arriveeAutorisee
         };
       }
     }

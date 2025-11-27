@@ -7,7 +7,7 @@
  */
 
 import type { Env } from '../../index.js';
-import type { BookingDisplay } from '../../types/api.js';
+import type { IBookingDisplay } from '../../types/api.js';
 
 /**
  * Vérifie si on est en mode stub (localhost:3000)
@@ -18,74 +18,74 @@ export function isStubMode(env: Env): boolean {
 }
 
 /**
- * Convertit une réservation locale (BookingDisplay) en format dossier pour le stub-server
+ * Convertit une réservation locale (IBookingDisplay) en format dossier pour le stub-server
  */
 function convertBookingToDossier(
-  booking: BookingDisplay,
+  booking: IBookingDisplay,
   idFournisseur: number
 ): Record<string, unknown> {
   // Calculer le nombre de nuits
-  const dateArrivee = new Date(booking.dateArrivee);
-  const dateDepart = new Date(booking.dateDepart);
-  const nbNuits = Math.ceil((dateDepart.getTime() - dateArrivee.getTime()) / (1000 * 60 * 60 * 24));
+  const arrivalDate = new Date(booking.arrivalDate);
+  const departureDate = new Date(booking.departureDate);
+  const numberOfNights = Math.ceil((departureDate.getTime() - arrivalDate.getTime()) / (1000 * 60 * 60 * 24));
   
   // Extraire nom et prénom du client
-  const clientNomParts = booking.clientNom?.split(' ') || [];
-  const clientPrenom = clientNomParts.length > 1 ? clientNomParts.slice(0, -1).join(' ') : undefined;
-  const clientNom = clientNomParts.length > 0 ? clientNomParts[clientNomParts.length - 1] : undefined;
+  const clientNameParts = booking.clientName?.split(' ') || [];
+  const clientFirstName = clientNameParts.length > 1 ? clientNameParts.slice(0, -1).join(' ') : undefined;
+  const clientLastName = clientNameParts.length > 0 ? clientNameParts[clientNameParts.length - 1] : undefined;
   
   return {
     idFournisseur,
-    reference: booking.reference || `RES-${new Date().getFullYear()}-${String(booking.idDossier || Date.now()).padStart(3, '0')}`,
-    dateCreation: booking.dateCreation || new Date().toISOString(),
-    dateModification: booking.dateCreation || new Date().toISOString(),
+    reference: booking.reference || `RES-${new Date().getFullYear()}-${String(booking.bookingId || Date.now()).padStart(3, '0')}`,
+    dateCreation: booking.creationDate || new Date().toISOString(),
+    dateModification: booking.creationDate || new Date().toISOString(),
     client: {
-      civilite: booking.clientCivilite || 'M',
-      nom: clientNom || '',
-      prenom: clientPrenom || '',
+      civilite: booking.clientTitle || 'M',
+      nom: clientLastName || '',
+      prenom: clientFirstName || '',
       email: booking.clientEmail || '',
-      telephone: booking.clientTelephone || '',
-      remarques: booking.clientRemarques || '',
-      adresse: booking.clientAdresse || '',
-      codePostal: booking.clientCodePostal || '',
-      ville: booking.clientVille || '',
-      pays: booking.clientPays || '',
-      dateNaissance: booking.clientDateNaissance || '',
-      nationalite: booking.clientNationalite || '',
+      telephone: booking.clientPhone || '',
+      remarques: booking.clientNotes || '',
+      adresse: booking.clientAddress || '',
+      codePostal: booking.clientPostalCode || '',
+      ville: booking.clientCity || '',
+      pays: booking.clientCountry || '',
+      dateNaissance: booking.clientBirthDate || '',
+      nationalite: booking.clientNationality || '',
       profession: booking.clientProfession || '',
-      societe: booking.clientSociete || '',
+      societe: booking.clientCompany || '',
       siret: booking.clientSiret || '',
-      tva: booking.clientTva || '',
-      langue: booking.clientLangue || 'fr',
+      tva: booking.clientVat || '',
+      langue: booking.clientLanguage || 'fr',
       newsletter: booking.clientNewsletter || false,
-      cgvAcceptees: booking.clientCgvAcceptees || true
+      cgvAcceptees: booking.clientTermsAccepted || true
     },
     hebergement: {
-      idHebergement: booking.idHebergement,
+      idHebergement: booking.accommodationId,
       nom: '', // Le nom sera récupéré par le stub-server depuis ses données
-      dateArrivee: booking.dateArrivee,
-      dateDepart: booking.dateDepart,
-      nbNuits: booking.nbNuits || nbNuits,
-      nbPersonnes: booking.nbPersonnes || 2,
+      dateArrivee: booking.arrivalDate,
+      dateDepart: booking.departureDate,
+      nbNuits: booking.numberOfNights || numberOfNights,
+      nbPersonnes: booking.numberOfPersons || 2,
       typeTarif: {
         idTypeTarif: 1001,
-        libelle: booking.typeTarifLibelle || 'Tarif public',
+        libelle: booking.rateTypeLabel || 'Tarif public',
         description: 'Tarif public annulable sans frais jusqu\'au jour de votre arrivée'
       }
     },
     paiement: {
-      montantTotal: booking.montantTotal || 0,
-      devise: booking.devise || 'EUR',
+      montantTotal: booking.totalAmount || 0,
+      devise: booking.currency || 'EUR',
       transactions: []
     },
     transaction: {
       transactionResaLocale: {
-        idTransaction: `TXN-LOC-${booking.idDossier || Date.now()}`,
-        reference: `REF-LOC-${booking.reference || `RES-${new Date().getFullYear()}-${String(booking.idDossier || Date.now()).padStart(3, '0')}`}`,
-        dateCreation: booking.dateCreation || new Date().toISOString(),
-        dateModification: booking.dateCreation || new Date().toISOString(),
-        montant: booking.montantTotal || 0,
-        devise: booking.devise || 'EUR',
+        idTransaction: `TXN-LOC-${booking.bookingId || Date.now()}`,
+        reference: `REF-LOC-${booking.reference || `RES-${new Date().getFullYear()}-${String(booking.bookingId || Date.now()).padStart(3, '0')}`}`,
+        dateCreation: booking.creationDate || new Date().toISOString(),
+        dateModification: booking.creationDate || new Date().toISOString(),
+        montant: booking.totalAmount || 0,
+        devise: booking.currency || 'EUR',
         statut: 'confirme',
         pointDeVente: 'Site web',
         utilisateur: 'client'
@@ -102,7 +102,7 @@ function convertBookingToDossier(
  * @param env - Variables d'environnement
  */
 export async function syncBookingToStub(
-  booking: BookingDisplay,
+  booking: IBookingDisplay,
   idFournisseur: number,
   env: Env
 ): Promise<void> {

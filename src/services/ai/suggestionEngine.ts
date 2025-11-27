@@ -9,7 +9,7 @@
 import { generateObject as aiGenerateObject } from 'ai';
 import { z } from 'zod';
 import { getAIModel } from '../../config/ai.js';
-import type { SuggestionRequest, PricingSuggestion } from '../../types/suggestions.js';
+import type { ISuggestionRequest, IPricingSuggestion } from '../../types/suggestions.js';
 import { generateAnalysisPrompt } from './analysisPrompts.js';
 import type { Env } from '../../index.js';
 
@@ -18,9 +18,9 @@ import type { Env } from '../../index.js';
  */
 interface AISuggestionItem {
   type: 'rate_increase' | 'rate_decrease' | 'min_stay_increase' | 'min_stay_decrease';
-  idTypeTarif?: number;
-  dateDebut: string;
-  dateFin: string;
+  idTypeTarif?: number; // Garder le nom JSON pour l'IA
+  dateDebut: string; // Garder le nom JSON pour l'IA
+  dateFin: string; // Garder le nom JSON pour l'IA
   currentValue: number;
   suggestedValue: number;
   confidence: number;
@@ -60,9 +60,9 @@ const suggestionSchema = z.object({
  * @throws {Error} Peut lever une erreur si la génération échoue
  */
 export async function generatePricingSuggestions(
-  request: SuggestionRequest,
+  request: ISuggestionRequest,
   env: Env
-): Promise<PricingSuggestion[]> {
+): Promise<IPricingSuggestion[]> {
   const model = getAIModel(env);
   const prompt = generateAnalysisPrompt(request);
   const traceId = crypto.randomUUID();
@@ -103,15 +103,15 @@ export async function generatePricingSuggestions(
     // Extraire les suggestions depuis l'objet retourné et valider le type
     const aiResponse = result.object as { suggestions: AISuggestionItem[] };
 
-    // Transformer en PricingSuggestion avec IDs
+    // Transformer en IPricingSuggestion avec IDs
     return aiResponse.suggestions.map((s, index) => ({
       id: `suggestion-${Date.now()}-${index}`,
       type: s.type,
-      idFournisseur: request.idFournisseur,
-      idHebergement: request.idHebergement,
-      idTypeTarif: s.idTypeTarif,
-      dateDebut: s.dateDebut,
-      dateFin: s.dateFin,
+      supplierId: request.supplierId,
+      accommodationId: request.accommodationId,
+      rateTypeId: s.idTypeTarif,
+      startDate: s.dateDebut,
+      endDate: s.dateFin,
       currentValue: s.currentValue,
       suggestedValue: s.suggestedValue,
       confidence: s.confidence,
