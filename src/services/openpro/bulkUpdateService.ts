@@ -15,6 +15,7 @@ export interface BulkUpdateDate {
   rateTypeId?: number;       // présent si tarif modifié
   price?: number;            // présent si tarif modifié
   dureeMin?: number | null;  // présent si dureeMin modifiée
+  arriveeAutorisee?: boolean; // présent si arriveeAutorisee modifié
 }
 
 /**
@@ -44,6 +45,7 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
   rateTypeId?: number;
   price?: number;
   dureeMin?: number | null;
+  arriveeAutorisee?: boolean;
 }> {
   if (dates.length === 0) return [];
   
@@ -53,6 +55,7 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
     rateTypeId?: number;
     price?: number;
     dureeMin?: number | null;
+    arriveeAutorisee?: boolean;
   }> = [];
   
   let currentPeriod: {
@@ -61,10 +64,11 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
     rateTypeId?: number;
     price?: number;
     dureeMin?: number | null;
+    arriveeAutorisee?: boolean;
   } | null = null;
   
   for (const date of dates) {
-    const key = `${date.rateTypeId ?? 'none'}-${date.price ?? 'none'}-${date.dureeMin ?? 'none'}`;
+    const key = `${date.rateTypeId ?? 'none'}-${date.price ?? 'none'}-${date.dureeMin ?? 'none'}-${date.arriveeAutorisee ?? 'none'}`;
     
     if (currentPeriod === null) {
       // Démarrer une nouvelle période
@@ -73,10 +77,11 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
         fin: date.date,
         rateTypeId: date.rateTypeId,
         price: date.price,
-        dureeMin: date.dureeMin
+        dureeMin: date.dureeMin,
+        arriveeAutorisee: date.arriveeAutorisee
       };
     } else {
-      const currentKey = `${currentPeriod.rateTypeId ?? 'none'}-${currentPeriod.price ?? 'none'}-${currentPeriod.dureeMin ?? 'none'}`;
+      const currentKey = `${currentPeriod.rateTypeId ?? 'none'}-${currentPeriod.price ?? 'none'}-${currentPeriod.dureeMin ?? 'none'}-${currentPeriod.arriveeAutorisee ?? 'none'}`;
       
       // Vérifier si on peut étendre la période courante
       if (key === currentKey && isConsecutiveDate(currentPeriod.fin, date.date)) {
@@ -90,7 +95,8 @@ function groupDatesIntoPeriods(dates: BulkUpdateDate[]): Array<{
           fin: date.date,
           rateTypeId: date.rateTypeId,
           price: date.price,
-          dureeMin: date.dureeMin
+          dureeMin: date.dureeMin,
+          arriveeAutorisee: date.arriveeAutorisee
         };
       }
     }
@@ -127,9 +133,10 @@ function transformPeriodToTarifModif(period: {
   rateTypeId?: number;
   price?: number;
   dureeMin?: number | null;
+  arriveeAutorisee?: boolean;
 }): TarifModif | null {
-  // Si aucune modification de tarif ni de durée minimale, ignorer
-  if (period.rateTypeId === undefined && period.dureeMin === undefined) {
+  // Si aucune modification de tarif, durée minimale, ni arrivée autorisée, ignorer
+  if (period.rateTypeId === undefined && period.dureeMin === undefined && period.arriveeAutorisee === undefined) {
     return null;
   }
   
@@ -138,7 +145,7 @@ function transformPeriodToTarifModif(period: {
     return null;
   }
   
-  // Si seulement dureeMin est modifié, on doit avoir un rateTypeId (fourni par le frontend)
+  // Si seulement dureeMin ou arriveeAutorisee est modifié, on doit avoir un rateTypeId (fourni par le frontend)
   // Si on n'a pas de rateTypeId, ignorer
   if (period.rateTypeId === undefined) {
     return null;
@@ -155,7 +162,7 @@ function transformPeriodToTarifModif(period: {
     ];
   } else {
     // Si pas de prix mais qu'on a un rateTypeId, utiliser une structure vide
-    // Cela permet de modifier seulement dureeMin sans modifier le prix
+    // Cela permet de modifier seulement dureeMin ou arriveeAutorisee sans modifier le prix
     tarifPax.listeTarifPaxOccupation = [];
   }
   
@@ -166,7 +173,7 @@ function transformPeriodToTarifModif(period: {
     ouvert: true,
     dureeMin: period.dureeMin !== undefined ? (period.dureeMin ?? 1) : 1, // Utiliser la valeur modifiée ou 1 par défaut
     dureeMax: 30,
-    arriveeAutorisee: true,
+    arriveeAutorisee: period.arriveeAutorisee !== undefined ? period.arriveeAutorisee : true, // Utiliser la valeur modifiée ou true par défaut
     departAutorise: true,
     tarifPax
   };

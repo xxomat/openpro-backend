@@ -53,6 +53,7 @@ export async function getSupplierData(
   const nextPromo: Record<number, Record<string, boolean>> = {};
   const nextRateTypes: Record<number, Record<string, string[]>> = {};
   const nextDureeMin: Record<number, Record<string, Record<number, number | null>>> = {};
+  const nextArriveeAutorisee: Record<number, Record<string, Record<number, boolean>>> = {};
   const nextBookings: Record<number, import('../../types/api.js').BookingDisplay[]> = {};
   const nextRateTypeLinks: Record<number, number[]> = {};
   const debut = formatDate(startDate);
@@ -101,6 +102,7 @@ export async function getSupplierData(
       nextPromo[acc.idHebergement] = ratesData.promo;
       nextRateTypes[acc.idHebergement] = ratesData.rateTypes;
       nextDureeMin[acc.idHebergement] = ratesData.dureeMin;
+      nextArriveeAutorisee[acc.idHebergement] = ratesData.arriveeAutorisee;
     } catch {
       // Ignorer les erreurs de tarifs pour l'instant
     }
@@ -138,6 +140,7 @@ export async function getSupplierData(
     promo: nextPromo,
     rateTypes: nextRateTypes,
     dureeMin: nextDureeMin,
+    arriveeAutorisee: nextArriveeAutorisee,
     rateTypeLabels,
     rateTypesList,
     bookings: nextBookings,

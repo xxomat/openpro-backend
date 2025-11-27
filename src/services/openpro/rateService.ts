@@ -39,6 +39,7 @@ function processTarif(
   mapPromo: Record<string, boolean>,
   mapRateTypes: Record<string, string[]>,
   mapDureeMin: Record<string, Record<number, number | null>>,
+  mapArriveeAutorisee: Record<string, Record<number, boolean>>,
   discoveredRateTypes: Map<number, DiscoveredRateType>
 ): void {
   // Lire les dates du tarif (gérer le cas où "fin " a un espace à la fin)
@@ -92,6 +93,9 @@ function processTarif(
   const dureeMinValue = tarif.dureeMin != null && typeof tarif.dureeMin === 'number' && tarif.dureeMin > 0 
     ? tarif.dureeMin 
     : null;
+  const arriveeAutoriseeValue = tarif.arriveeAutorisee !== undefined 
+    ? Boolean(tarif.arriveeAutorisee) 
+    : true; // Par défaut true si non défini
   
   // Mettre à jour les types de tarifs découverts
   if (idType) {
@@ -130,10 +134,17 @@ function processTarif(
         mapDureeMin[key][idType] = dureeMinValue;
       }
       
+      if (idType) {
+        if (!mapArriveeAutorisee[key]) {
+          mapArriveeAutorisee[key] = {};
+        }
+        mapArriveeAutorisee[key][idType] = arriveeAutoriseeValue;
+      }
+      
       cur.setDate(cur.getDate() + 1);
     }
   } else {
-    // Cas où on n'a pas de prix valide : on met à jour seulement les durées minimales
+    // Cas où on n'a pas de prix valide : on met à jour seulement les durées minimales et arrivée autorisée
     const cur = new Date(actualStart);
     while (cur <= actualEnd) {
       const key = formatDate(cur);
@@ -142,6 +153,12 @@ function processTarif(
           mapDureeMin[key] = {};
         }
         mapDureeMin[key][idType] = dureeMinValue;
+      }
+      if (idType) {
+        if (!mapArriveeAutorisee[key]) {
+          mapArriveeAutorisee[key] = {};
+        }
+        mapArriveeAutorisee[key][idType] = arriveeAutoriseeValue;
       }
       cur.setDate(cur.getDate() + 1);
     }
@@ -177,6 +194,7 @@ export async function loadRatesForAccommodation(
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
   dureeMin: Record<string, Record<number, number | null>>;
+  arriveeAutorisee: Record<string, Record<number, boolean>>;
 }> {
   const openProClient = getOpenProClient(env);
   // Ne pas passer de paramètres de date à getRates selon la documentation API
@@ -187,19 +205,21 @@ export async function loadRatesForAccommodation(
   const mapPromo: Record<string, boolean> = {};
   const mapRateTypes: Record<string, string[]> = {};
   const mapDureeMin: Record<string, Record<number, number | null>> = {};
+  const mapArriveeAutorisee: Record<string, Record<number, boolean>> = {};
   
   const apiResponse = rates as unknown as RatesResponse;
   const tarifs: ApiTarif[] = apiResponse.tarifs ?? apiResponse.periodes ?? [];
   
   for (const tarif of tarifs) {
-    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, discoveredRateTypes);
+    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, mapArriveeAutorisee, discoveredRateTypes);
   }
   
   return {
     rates: mapRates,
     promo: mapPromo,
     rateTypes: mapRateTypes,
-    dureeMin: mapDureeMin
+    dureeMin: mapDureeMin,
+    arriveeAutorisee: mapArriveeAutorisee
   };
 }
 

@@ -101,6 +101,8 @@ export interface ApiTarif {
   promotionActive?: boolean | unknown;
   hasPromo?: boolean | unknown;
   dureeMin?: number;
+  arriveeAutorisee?: boolean;
+  departAutorise?: boolean;
   description?: MultilingualField;
   ordre?: number;
 }
