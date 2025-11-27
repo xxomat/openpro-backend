@@ -63,17 +63,12 @@ export async function loadRateTypes(
     const apiRateTypesResponse = allRateTypesResponse as unknown as RateTypeListResponse;
     const allRateTypes: ApiRateType[] = apiRateTypesResponse.typeTarifs ?? [];
     
-    const firstAcc = accommodationsList[0];
-    const links = await openProClient.listAccommodationRateTypeLinks(idFournisseur, firstAcc.idHebergement);
-    if (signal?.aborted) throw new Error('Cancelled');
-    const apiLinksResponse = links as unknown as AccommodationRateTypeLinksResponse;
-    const liaisons: AccommodationRateTypeLink[] = apiLinksResponse.liaisonHebergementTypeTarifs ?? apiLinksResponse.data?.liaisonHebergementTypeTarifs ?? [];
-    const linkedIds = new Set(liaisons.map((l: AccommodationRateTypeLink) => Number(l.idTypeTarif)));
-    
+    // Retourner TOUS les types de tarif, pas seulement ceux liés
+    // Cela permet d'afficher tous les types de tarif dans le sélecteur principal
     for (const rateType of allRateTypes) {
       const id = Number(rateType.cleTypeTarif?.idTypeTarif ?? rateType.idTypeTarif);
       
-      if (id && linkedIds.has(id)) {
+      if (id) {
         const descriptionFr = extractFrenchText(rateType.description);
         const libelleFr = extractFrenchText(rateType.libelle);
         

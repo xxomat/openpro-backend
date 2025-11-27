@@ -68,16 +68,19 @@ export interface SupplierData {
   rates: Record<number, Record<string, Record<number, number>>>;
   promo: Record<number, Record<string, boolean>>;
   rateTypes: Record<number, Record<string, string[]>>;
-  dureeMin: Record<number, Record<string, number | null>>;
+  dureeMin: Record<number, Record<string, Record<number, number | null>>>;
+  arriveeAutorisee: Record<number, Record<string, Record<number, boolean>>>;
   rateTypeLabels: Record<number, string>;
   rateTypesList: RateType[];
   bookings: Record<number, BookingDisplay[]>;
+  /** Map des IDs de types de tarif liés par hébergement (clé: idHebergement, valeur: array d'idTypeTarif) */
+  rateTypeLinksByAccommodation: Record<number, number[]>;
 }
 
 export interface RatesData {
   rates: Record<string, Record<number, number>>;
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
-  dureeMin: Record<string, number | null>;
+  dureeMin: Record<string, Record<number, number | null>>;
 }
 

@@ -107,17 +107,24 @@ export default {
     const url = new URL(request.url);
     const startTime = Date.now();
     
-    // Logger la requête entrante avec plus de détails
-    logger.info(`${request.method} ${url.pathname}${url.search}`, {
-      origin: request.headers.get('origin'),
-      userAgent: request.headers.get('user-agent'),
-      referer: request.headers.get('referer')
-    });
+    // Ne pas logger les requêtes admin (vers /api/*)
+    const isAdminRequest = url.pathname.startsWith('/api/');
+    
+    // Logger la requête entrante avec plus de détails (uniquement si ce n'est pas une requête admin)
+    if (!isAdminRequest) {
+      logger.info(`${request.method} ${url.pathname}${url.search}`, {
+        origin: request.headers.get('origin'),
+        userAgent: request.headers.get('user-agent'),
+        referer: request.headers.get('referer')
+      });
+    }
     
     try {
       // Gérer les requêtes OPTIONS (CORS preflight)
       if (request.method === 'OPTIONS') {
-        logger.info('OPTIONS preflight request');
+        if (!isAdminRequest) {
+          logger.info('OPTIONS preflight request');
+        }
         return handleCors(request);
       }
       
@@ -127,7 +134,9 @@ export default {
       // Health check endpoint (en premier pour être sûr qu'il fonctionne)
       // IMPORTANT: Les handlers itty-router reçoivent (request, env, executionCtx) automatiquement
       router.get('/health', (request: IRequest, env: Env, executionCtx: ExecutionContext) => {
-        logger.info('Health check called');
+        if (!isAdminRequest) {
+          logger.info('Health check called');
+        }
         return jsonResponse({
           status: 'ok',
           timestamp: new Date().toISOString(),
@@ -139,7 +148,9 @@ export default {
       
       // Debug endpoint
       router.get('/debug', (request: IRequest, env: Env, executionCtx: ExecutionContext) => {
-        logger.info('Debug endpoint called');
+        if (!isAdminRequest) {
+          logger.info('Debug endpoint called');
+        }
         return jsonResponse({
           status: 'ok',
           timestamp: new Date().toISOString(),
@@ -167,7 +178,9 @@ export default {
       
       // Route par défaut (404) - doit être en dernier
       router.all('*', (request: IRequest) => {
-        logger.warn(`No route matched for ${request.method} ${url.pathname}`);
+        if (!isAdminRequest) {
+          logger.warn(`No route matched for ${request.method} ${url.pathname}`);
+        }
         return jsonResponse({
           error: 'Not Found',
           path: url.pathname,
@@ -177,12 +190,16 @@ export default {
       
       // Gérer la requête
       // IMPORTANT: Utiliser router.fetch() pour Cloudflare Workers (au lieu de router.handle())
-      logger.info('Routing request...');
+      if (!isAdminRequest) {
+        logger.info('Routing request...');
+      }
       const response = await router.fetch(request, env, executionCtx);
       
       // Si aucune route ne matche, router.handle() peut retourner undefined
       if (!response) {
-        logger.error(`Router returned undefined for ${request.method} ${url.pathname}`);
+        if (!isAdminRequest) {
+          logger.error(`Router returned undefined for ${request.method} ${url.pathname}`);
+        }
         return jsonResponse({
           error: 'Internal Server Error',
           message: 'Router did not return a response',
@@ -191,9 +208,11 @@ export default {
         }, 500);
       }
       
-      // Logger la réponse
-      const duration = Date.now() - startTime;
-      logger.info(`${request.method} ${url.pathname} ${response.status} (${duration}ms)`);
+      // Logger la réponse (uniquement si ce n'est pas une requête admin)
+      if (!isAdminRequest) {
+        const duration = Date.now() - startTime;
+        logger.info(`${request.method} ${url.pathname} ${response.status} (${duration}ms)`);
+      }
       
       return response;
       

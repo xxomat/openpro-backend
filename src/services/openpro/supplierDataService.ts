@@ -16,7 +16,9 @@ import { loadRateTypes, buildRateTypesList } from './rateTypeService.js';
 import { loadRatesForAccommodation } from './rateService.js';
 import { loadBookingsForAccommodation } from './bookingService.js';
 import { loadLocalBookingsForAccommodation } from './localBookingService.js';
+import { getOpenProClient } from '../openProClient.js';
 import type { Env } from '../../index.js';
+import type { AccommodationRateTypeLink, AccommodationRateTypeLinksResponse } from '../../types/apiTypes.js';
 
 /**
  * Charge toutes les données (stock, tarifs, types de tarifs) pour un fournisseur
@@ -50,8 +52,10 @@ export async function getSupplierData(
   const nextRates: Record<number, Record<string, Record<number, number>>> = {};
   const nextPromo: Record<number, Record<string, boolean>> = {};
   const nextRateTypes: Record<number, Record<string, string[]>> = {};
-  const nextDureeMin: Record<number, Record<string, number | null>> = {};
+  const nextDureeMin: Record<number, Record<string, Record<number, number | null>>> = {};
+  const nextArriveeAutorisee: Record<number, Record<string, Record<number, boolean>>> = {};
   const nextBookings: Record<number, import('../../types/api.js').BookingDisplay[]> = {};
+  const nextRateTypeLinks: Record<number, number[]> = {};
   const debut = formatDate(startDate);
   const fin = formatDate(endDate);
   
@@ -61,6 +65,22 @@ export async function getSupplierData(
   // Charger les données pour chaque hébergement
   for (const acc of accommodationsList) {
     if (signal?.aborted) throw new Error('Cancelled');
+    
+    // Charger les liaisons entre hébergement et types de tarif
+    try {
+      const openProClient = getOpenProClient(env);
+      const linksResponse = await openProClient.listAccommodationRateTypeLinks(idFournisseur, acc.idHebergement);
+      if (signal?.aborted) throw new Error('Cancelled');
+      const apiLinksResponse = linksResponse as unknown as AccommodationRateTypeLinksResponse;
+      const liaisons: AccommodationRateTypeLink[] = apiLinksResponse.liaisonHebergementTypeTarifs ?? apiLinksResponse.data?.liaisonHebergementTypeTarifs ?? [];
+      // Extraire les IDs des types de tarif liés
+      nextRateTypeLinks[acc.idHebergement] = liaisons
+        .map((l: AccommodationRateTypeLink) => Number(l.idTypeTarif))
+        .filter((id: number) => !isNaN(id));
+    } catch {
+      // Ignorer les erreurs de liaisons, initialiser avec un array vide
+      nextRateTypeLinks[acc.idHebergement] = [];
+    }
     
     // Charger le stock
     const mapStock = await loadStockForAccommodation(idFournisseur, acc.idHebergement, debut, fin, env, signal);
@@ -82,6 +102,7 @@ export async function getSupplierData(
       nextPromo[acc.idHebergement] = ratesData.promo;
       nextRateTypes[acc.idHebergement] = ratesData.rateTypes;
       nextDureeMin[acc.idHebergement] = ratesData.dureeMin;
+      nextArriveeAutorisee[acc.idHebergement] = ratesData.arriveeAutorisee;
     } catch {
       // Ignorer les erreurs de tarifs pour l'instant
     }
@@ -119,9 +140,11 @@ export async function getSupplierData(
     promo: nextPromo,
     rateTypes: nextRateTypes,
     dureeMin: nextDureeMin,
+    arriveeAutorisee: nextArriveeAutorisee,
     rateTypeLabels,
     rateTypesList,
-    bookings: nextBookings
+    bookings: nextBookings,
+    rateTypeLinksByAccommodation: nextRateTypeLinks
   };
 }
 

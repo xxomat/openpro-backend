@@ -33,21 +33,19 @@ export async function loadStockForAccommodation(
   signal?: AbortSignal
 ): Promise<Record<string, number>> {
   const openProClient = getOpenProClient(env);
-  const stock = await openProClient.getStock(idFournisseur, idHebergement, {
-    debut,
-    fin,
-    start: debut,
-    end: fin
-  } as unknown as { debut?: string; fin?: string });
+  // Ne pas passer de paramètres de date à getStock selon la documentation API
+  const stock = await openProClient.getStock(idFournisseur, idHebergement);
   if (signal?.aborted) throw new Error('Cancelled');
   
   const mapStock: Record<string, number> = {};
-  const jours = (stock as any).jours ?? (stock as any).stock ?? [];
-  for (const j of jours) {
+  // Format OpenPro : { listeStock: [{ date, valeur }] }
+  // Compatibilité avec ancien format : { jours: [{ date, dispo }] } ou { stock: [{ jour, stock }] }
+  const stockArray = (stock as any).listeStock ?? (stock as any).stock ?? (stock as any).jours ?? [];
+  for (const j of stockArray) {
     const date = j.date ?? j.jour;
-    const dispo = j.dispo ?? j.stock ?? 0;
+    const valeur = j.valeur ?? j.dispo ?? j.stock ?? 0;
     if (date) {
-      mapStock[String(date)] = Number(dispo ?? 0);
+      mapStock[String(date)] = Number(valeur ?? 0);
     }
   }
   return mapStock;

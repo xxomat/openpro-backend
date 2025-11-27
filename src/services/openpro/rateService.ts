@@ -28,7 +28,7 @@ import { updateDiscoveredRateTypes } from './rateTypeService.js';
  * @param mapRates - Map des tarifs par date et type (sera modifiée)
  * @param mapPromo - Map des promotions par date (sera modifiée)
  * @param mapRateTypes - Map des types de tarifs par date (sera modifiée)
- * @param mapDureeMin - Map des durées minimales par date (sera modifiée)
+ * @param mapDureeMin - Map des durées minimales par date et type de tarif (sera modifiée)
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
  */
 function processTarif(
@@ -38,15 +38,39 @@ function processTarif(
   mapRates: Record<string, Record<number, number>>,
   mapPromo: Record<string, boolean>,
   mapRateTypes: Record<string, string[]>,
-  mapDureeMin: Record<string, number | null>,
+  mapDureeMin: Record<string, Record<number, number | null>>,
+  mapArriveeAutorisee: Record<string, Record<number, boolean>>,
   discoveredRateTypes: Map<number, DiscoveredRateType>
 ): void {
-  const deb = tarif.debut ?? tarif.dateDebut ?? debut;
-  const fe = tarif.fin ?? tarif.dateFin ?? fin;
+  // Lire les dates du tarif (gérer le cas où "fin " a un espace à la fin)
+  // IMPORTANT : Ne pas utiliser les paramètres debut/fin comme fallback car chaque tarif
+  // doit avoir ses propres dates explicites dans la réponse API
+  // L'API peut retourner "fin " avec un espace comme clé de propriété, donc on doit chercher
+  // dans toutes les clés de l'objet pour trouver "fin" ou "fin "
+  const deb = String(tarif.debut ?? tarif.dateDebut ?? '').trim();
+  // Chercher "fin" dans les clés de l'objet (peut être "fin" ou "fin " avec espace)
+  const fe = String(
+    tarif.fin ?? 
+    tarif.dateFin ?? 
+    (tarif as any)['fin '] ?? 
+    (tarif as any)['dateFin '] ?? 
+    ''
+  ).trim();
+  
+  // Si le tarif n'a pas de dates explicites, ignorer (ne pas utiliser debut/fin comme fallback)
+  if (!deb || !fe) {
+    return;
+  }
+  
   const startD = new Date(deb + 'T00:00:00');
   const endD = new Date(fe + 'T23:59:59');
   const requestedStart = new Date(debut + 'T00:00:00');
   const requestedEnd = new Date(fin + 'T23:59:59');
+  
+  // Vérifier que les dates sont valides
+  if (isNaN(startD.getTime()) || isNaN(endD.getTime())) {
+    return;
+  }
   
   // Ignorer les tarifs en dehors de la plage demandée
   if (endD < requestedStart || startD > requestedEnd) {
@@ -54,6 +78,7 @@ function processTarif(
   }
   
   // Calculer la période effective (intersection entre la période du tarif et la plage demandée)
+  // Chaque tarif de l'API a généralement debut = fin (une seule date), donc actualStart = actualEnd
   const actualStart = startD > requestedStart ? startD : requestedStart;
   const actualEnd = endD < requestedEnd ? endD : requestedEnd;
   
@@ -68,6 +93,9 @@ function processTarif(
   const dureeMinValue = tarif.dureeMin != null && typeof tarif.dureeMin === 'number' && tarif.dureeMin > 0 
     ? tarif.dureeMin 
     : null;
+  const arriveeAutoriseeValue = tarif.arriveeAutorisee !== undefined 
+    ? Boolean(tarif.arriveeAutorisee) 
+    : true; // Par défaut true si non défini
   
   // Mettre à jour les types de tarifs découverts
   if (idType) {
@@ -99,29 +127,38 @@ function processTarif(
         }
       }
       
-      if (dureeMinValue != null) {
-        const existingDureeMin = mapDureeMin[key];
-        if (existingDureeMin == null || dureeMinValue > existingDureeMin) {
-          mapDureeMin[key] = dureeMinValue;
+      if (dureeMinValue != null && idType) {
+        if (!mapDureeMin[key]) {
+          mapDureeMin[key] = {};
         }
-      } else if (mapDureeMin[key] == null) {
-        mapDureeMin[key] = null;
+        mapDureeMin[key][idType] = dureeMinValue;
+      }
+      
+      if (idType) {
+        if (!mapArriveeAutorisee[key]) {
+          mapArriveeAutorisee[key] = {};
+        }
+        mapArriveeAutorisee[key][idType] = arriveeAutoriseeValue;
       }
       
       cur.setDate(cur.getDate() + 1);
     }
   } else {
-    // Cas où on n'a pas de prix valide : on met à jour seulement les durées minimales
+    // Cas où on n'a pas de prix valide : on met à jour seulement les durées minimales et arrivée autorisée
     const cur = new Date(actualStart);
     while (cur <= actualEnd) {
       const key = formatDate(cur);
-      if (dureeMinValue != null) {
-        const existingDureeMin = mapDureeMin[key];
-        if (existingDureeMin == null || dureeMinValue > existingDureeMin) {
-          mapDureeMin[key] = dureeMinValue;
+      if (dureeMinValue != null && idType) {
+        if (!mapDureeMin[key]) {
+          mapDureeMin[key] = {};
         }
-      } else if (mapDureeMin[key] == null) {
-        mapDureeMin[key] = null;
+        mapDureeMin[key][idType] = dureeMinValue;
+      }
+      if (idType) {
+        if (!mapArriveeAutorisee[key]) {
+          mapArriveeAutorisee[key] = {};
+        }
+        mapArriveeAutorisee[key][idType] = arriveeAutoriseeValue;
       }
       cur.setDate(cur.getDate() + 1);
     }
@@ -156,29 +193,33 @@ export async function loadRatesForAccommodation(
   rates: Record<string, Record<number, number>>;
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
-  dureeMin: Record<string, number | null>;
+  dureeMin: Record<string, Record<number, number | null>>;
+  arriveeAutorisee: Record<string, Record<number, boolean>>;
 }> {
   const openProClient = getOpenProClient(env);
-  const rates = await openProClient.getRates(idFournisseur, idHebergement, { debut, fin });
+  // Ne pas passer de paramètres de date à getRates selon la documentation API
+  const rates = await openProClient.getRates(idFournisseur, idHebergement);
   if (signal?.aborted) throw new Error('Cancelled');
   
   const mapRates: Record<string, Record<number, number>> = {};
   const mapPromo: Record<string, boolean> = {};
   const mapRateTypes: Record<string, string[]> = {};
-  const mapDureeMin: Record<string, number | null> = {};
+  const mapDureeMin: Record<string, Record<number, number | null>> = {};
+  const mapArriveeAutorisee: Record<string, Record<number, boolean>> = {};
   
   const apiResponse = rates as unknown as RatesResponse;
   const tarifs: ApiTarif[] = apiResponse.tarifs ?? apiResponse.periodes ?? [];
   
   for (const tarif of tarifs) {
-    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, discoveredRateTypes);
+    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, mapArriveeAutorisee, discoveredRateTypes);
   }
   
   return {
     rates: mapRates,
     promo: mapPromo,
     rateTypes: mapRateTypes,
-    dureeMin: mapDureeMin
+    dureeMin: mapDureeMin,
+    arriveeAutorisee: mapArriveeAutorisee
   };
 }
 

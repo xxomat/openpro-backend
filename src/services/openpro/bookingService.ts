@@ -84,114 +84,148 @@ export async function loadBookingsForAccommodation(
   if (signal?.aborted) throw new Error('Cancelled');
   
   const bookings: BookingDisplay[] = [];
-  const dossiers = bookingList.dossiers ?? [];
+  // Le nouveau format retourne une liste de résumés (BookingSummary)
+  // Il faut charger les détails complets pour chaque résumé
+  const summaries = bookingList.liste ?? [];
   
-  for (const dossier of dossiers) {
-    const booking = dossier as Booking;
+  for (const summary of summaries) {
+    // Charger les détails complets du dossier
+    const dossier = await openProClient.getBooking(summary.cleDossier.idFournisseur, summary.cleDossier.idDossier);
+    if (signal?.aborted) throw new Error('Cancelled');
     
-    // Filtrer par hébergement
-    if (booking.hebergement?.idHebergement !== idHebergement) {
-      continue;
+    // Le nouveau format retourne directement le dossier (BookingDossier)
+    // Il peut y avoir plusieurs hébergements dans listeHebergement
+    const listeHebergement = dossier.listeHebergement ?? [];
+    
+    for (const hebergementItem of listeHebergement) {
+      // Filtrer par hébergement
+      if (hebergementItem.cleHebergement?.idHebergement !== idHebergement) {
+        continue;
+      }
+      
+      // Vérifier que les dates sont présentes
+      if (!hebergementItem.sejour?.debut || !hebergementItem.sejour?.fin) {
+        continue;
+      }
+      
+      // Extraire toutes les informations du contact
+      let clientNom: string | undefined;
+      let clientCivilite: string | undefined;
+      let clientEmail: string | undefined;
+      let clientTelephone: string | undefined;
+      let clientRemarques: string | undefined;
+      let clientAdresse: string | undefined;
+      let clientCodePostal: string | undefined;
+      let clientVille: string | undefined;
+      let clientPays: string | undefined;
+      let clientDateNaissance: string | undefined;
+      let clientNationalite: string | undefined;
+      let clientProfession: string | undefined;
+      let clientSociete: string | undefined;
+      let clientSiret: string | undefined;
+      let clientTva: string | undefined;
+      let clientLangue: string | undefined;
+      let clientNewsletter: boolean | undefined;
+      let clientCgvAcceptees: boolean | undefined;
+      
+      if (dossier.contact) {
+        const parts: string[] = [];
+        if (dossier.contact.prenom) parts.push(dossier.contact.prenom);
+        if (dossier.contact.nom) parts.push(dossier.contact.nom);
+        clientNom = parts.length > 0 ? parts.join(' ') : undefined;
+        // Note: contact n'a pas de civilite dans le nouveau format
+        clientEmail = dossier.contact.email;
+        clientTelephone = dossier.contact.telephone1;
+        clientRemarques = dossier.contact.remarques ?? undefined;
+        clientAdresse = dossier.contact.adresse;
+        clientCodePostal = dossier.contact.codePostal;
+        clientVille = dossier.contact.ville;
+        clientPays = dossier.contact.pays;
+        // Note: contact n'a pas dateNaissance, nationalite, profession dans le nouveau format
+        clientSociete = dossier.contact.societe ?? undefined;
+        // Note: contact n'a pas siret, tva, langue, newsletter, cgvAcceptees dans le nouveau format
+      }
+      
+      // Extraire le montant et la devise
+      const montantTotal = hebergementItem.montant;
+      const devise = dossier.devise;
+      
+      // Extraire les informations de l'hébergement
+      const nbPersonnes = hebergementItem.pax?.nbPers;
+      // Calculer le nombre de nuits à partir des dates
+      const dateArrivee = hebergementItem.sejour.debut;
+      const dateDepart = hebergementItem.sejour.fin;
+      const nbNuits = dateArrivee && dateDepart 
+        ? Math.ceil((new Date(dateDepart).getTime() - new Date(dateArrivee).getTime()) / (1000 * 60 * 60 * 24))
+        : undefined;
+      const typeTarifLibelle = hebergementItem.tarif?.typeTarif?.libelle;
+      
+      // Extraire la date de création
+      const dateCreation = dossier.dateCreation;
+      
+      // Déterminer la plateforme de réservation et extraire la référence
+      // Adapter getPlateformeReservation pour le nouveau format de transaction
+      let plateformeReservation = PlateformeReservation.Unknown;
+      let reference: string | undefined = undefined;
+      
+      if (dossier.transaction) {
+        if (dossier.transaction.transactionResaLocale) {
+          plateformeReservation = PlateformeReservation.Directe;
+          // Pour ResaLocale, on peut utiliser idTransaction ou reference si disponible
+          const resaLocale = dossier.transaction.transactionResaLocale as any;
+          reference = resaLocale?.reference || resaLocale?.idTransaction || undefined;
+        } else if (dossier.transaction.transactionBooking) {
+          plateformeReservation = PlateformeReservation.BookingCom;
+          // Pour Booking, on peut utiliser confirmationCode ou reference si disponible
+          const booking = dossier.transaction.transactionBooking as any;
+          reference = booking?.confirmationCode || booking?.reference || booking?.idTransaction || undefined;
+        } else if (dossier.transaction.transactionXotelia) {
+          plateformeReservation = PlateformeReservation.Xotelia;
+          // Pour Xotelia, on peut utiliser reference ou idTransaction si disponible
+          const xotelia = dossier.transaction.transactionXotelia as any;
+          reference = xotelia?.reference || xotelia?.idTransaction || undefined;
+        } else if (dossier.transaction.transactionOpenSystem) {
+          plateformeReservation = PlateformeReservation.OpenPro;
+          // Pour OpenSystem, utiliser idReservation (c'est la référence principale)
+          reference = dossier.transaction.transactionOpenSystem.idReservation || undefined;
+        }
+      }
+      
+      bookings.push({
+        idDossier: dossier.cleDossier.idDossier,
+        idHebergement: hebergementItem.cleHebergement.idHebergement,
+        dateArrivee: hebergementItem.sejour.debut,
+        dateDepart: hebergementItem.sejour.fin,
+        reference,
+        clientNom,
+        clientCivilite,
+        clientEmail,
+        clientTelephone,
+        clientRemarques,
+        clientAdresse,
+        clientCodePostal,
+        clientVille,
+        clientPays,
+        clientDateNaissance,
+        clientNationalite,
+        clientProfession,
+        clientSociete,
+        clientSiret,
+        clientTva,
+        clientLangue,
+        clientNewsletter,
+        clientCgvAcceptees,
+        montantTotal,
+        nbPersonnes,
+        nbNuits,
+        typeTarifLibelle,
+        devise,
+        dateCreation,
+        plateformeReservation,
+        isPendingSync: false,
+        isObsolete: false
+      });
     }
-    
-    // Vérifier que les dates sont présentes
-    if (!booking.hebergement?.dateArrivee || !booking.hebergement?.dateDepart) {
-      continue;
-    }
-    
-    // Extraire toutes les informations du client
-    let clientNom: string | undefined;
-    let clientCivilite: string | undefined;
-    let clientEmail: string | undefined;
-    let clientTelephone: string | undefined;
-    let clientRemarques: string | undefined;
-    let clientAdresse: string | undefined;
-    let clientCodePostal: string | undefined;
-    let clientVille: string | undefined;
-    let clientPays: string | undefined;
-    let clientDateNaissance: string | undefined;
-    let clientNationalite: string | undefined;
-    let clientProfession: string | undefined;
-    let clientSociete: string | undefined;
-    let clientSiret: string | undefined;
-    let clientTva: string | undefined;
-    let clientLangue: string | undefined;
-    let clientNewsletter: boolean | undefined;
-    let clientCgvAcceptees: boolean | undefined;
-    
-    if (booking.client) {
-      const parts: string[] = [];
-      if (booking.client.prenom) parts.push(booking.client.prenom);
-      if (booking.client.nom) parts.push(booking.client.nom);
-      clientNom = parts.length > 0 ? parts.join(' ') : undefined;
-      clientCivilite = booking.client.civilite;
-      clientEmail = booking.client.email;
-      clientTelephone = booking.client.telephone;
-      clientRemarques = booking.client.remarques;
-      clientAdresse = booking.client.adresse;
-      clientCodePostal = booking.client.codePostal;
-      clientVille = booking.client.ville;
-      clientPays = booking.client.pays;
-      clientDateNaissance = booking.client.dateNaissance;
-      clientNationalite = booking.client.nationalite;
-      clientProfession = booking.client.profession;
-      clientSociete = booking.client.societe;
-      clientSiret = booking.client.siret;
-      clientTva = booking.client.tva;
-      clientLangue = booking.client.langue;
-      clientNewsletter = booking.client.newsletter;
-      clientCgvAcceptees = booking.client.cgvAcceptees;
-    }
-    
-    // Extraire le montant total et la devise
-    const montantTotal = booking.paiement?.montantTotal;
-    const devise = booking.paiement?.devise;
-    
-    // Extraire les informations de l'hébergement
-    const nbPersonnes = booking.hebergement?.nbPersonnes;
-    const nbNuits = booking.hebergement?.nbNuits;
-    const typeTarifLibelle = booking.hebergement?.typeTarif?.libelle;
-    
-    // Extraire la date de création
-    const dateCreation = booking.dateCreation;
-    
-    // Déterminer la plateforme de réservation
-    const plateformeReservation = getPlateformeReservation(booking.transaction);
-    
-    bookings.push({
-      idDossier: booking.idDossier ?? 0,
-      idHebergement: booking.hebergement.idHebergement ?? idHebergement,
-      dateArrivee: booking.hebergement.dateArrivee,
-      dateDepart: booking.hebergement.dateDepart,
-      reference: booking.reference,
-      clientNom,
-      clientCivilite,
-      clientEmail,
-      clientTelephone,
-      clientRemarques,
-      clientAdresse,
-      clientCodePostal,
-      clientVille,
-      clientPays,
-      clientDateNaissance,
-      clientNationalite,
-      clientProfession,
-      clientSociete,
-      clientSiret,
-      clientTva,
-      clientLangue,
-      clientNewsletter,
-      clientCgvAcceptees,
-      montantTotal,
-      nbPersonnes,
-      nbNuits,
-      typeTarifLibelle,
-      devise,
-      dateCreation,
-      plateformeReservation,
-      isPendingSync: false,
-      isObsolete: false
-    });
   }
   
   // Si des réservations locales sont fournies, les fusionner
