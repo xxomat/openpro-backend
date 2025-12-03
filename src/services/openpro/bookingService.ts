@@ -225,7 +225,6 @@ export async function loadBookingsForAccommodation(
         reservationPlatform,
         isPendingSync: false,
         isObsolete: false,
-        reservationPlatform: PlateformeReservation.Unknown,
         bookingStatus: BookingStatus.Confirmed
       });
     }

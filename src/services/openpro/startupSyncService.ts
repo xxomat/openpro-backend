@@ -390,13 +390,48 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
 
     // 1. Charger tous les plans tarifaires depuis la DB
     const dbRateTypes = await loadAllRateTypesFromDb(env);
-    console.log(`[StartupSync] Found ${dbRateTypes.length} rate types in DB`);
+    
+    // Extraire les noms des plans tarifaires depuis la DB
+    const dbRateTypeNames = dbRateTypes.map(rt => {
+      if (!rt.libelle) return `(sans nom, ID: ${rt.id})`;
+      try {
+        const parsed = JSON.parse(rt.libelle);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const frLabel = parsed.find((item: any) => item.langue === 'fr' || item.langue === 'FR');
+          return frLabel?.texte || parsed[0]?.texte || String(parsed[0]) || `(ID: ${rt.id})`;
+        }
+        if (typeof parsed === 'object' && parsed !== null) {
+          return parsed.fr || parsed.FR || Object.values(parsed)[0] || `(ID: ${rt.id})`;
+        }
+        return String(parsed) || `(ID: ${rt.id})`;
+      } catch {
+        return rt.libelle || `(ID: ${rt.id})`;
+      }
+    });
+    
+    console.log(`[StartupSync] Found ${dbRateTypes.length} rate types in DB: ${dbRateTypeNames.join(', ')}`);
 
     // 2. Fetcher tous les plans tarifaires depuis OpenPro
     const openProRateTypesResponse = await openProClient.listRateTypes(SUPPLIER_ID);
     const openProRateTypes = (openProRateTypesResponse as any)?.typeTarifs || [];
 
-    console.log(`[StartupSync] Found ${openProRateTypes.length} rate types in OpenPro`);
+    // Extraire les noms des plans tarifaires depuis OpenPro
+    const openProRateTypeNames = openProRateTypes.map((rt: any) => {
+      const idTypeTarif = rt.idTypeTarif ? `(ID: ${rt.idTypeTarif})` : '(sans ID)';
+      if (!rt.libelle) return `(sans nom) ${idTypeTarif}`;
+      
+      // Le libellé peut être un tableau Multilingue[] ou un objet
+      if (Array.isArray(rt.libelle)) {
+        const frLabel = rt.libelle.find((item: any) => item.langue === 'fr' || item.langue === 'FR');
+        return (frLabel?.texte || rt.libelle[0]?.texte || String(rt.libelle[0]) || '(sans nom)') + ` ${idTypeTarif}`;
+      }
+      if (typeof rt.libelle === 'object' && rt.libelle !== null) {
+        return (rt.libelle.fr || rt.libelle.FR || Object.values(rt.libelle)[0] || '(sans nom)') + ` ${idTypeTarif}`;
+      }
+      return String(rt.libelle) + ` ${idTypeTarif}`;
+    });
+
+    console.log(`[StartupSync] Found ${openProRateTypes.length} rate types in OpenPro: ${openProRateTypeNames.join(', ')}`);
 
     // Créer un Set des IDs OpenPro pour recherche rapide
     const openProRateTypeIds = new Set<number>();
@@ -419,30 +454,65 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
 
       // Plan tarifaire sans ID OpenPro : créer dans OpenPro
       try {
-        // Parser le libellé JSON si présent
-        let libelle: any = undefined;
-        if (dbRateType.libelle) {
+        /**
+         * Normalise une valeur multilingue en tableau Multilingue[]
+         * Gère les formats : tableau, objet {fr: "...", en: "..."}, chaîne, null/undefined
+         */
+        function normalizeMultilingue(value: string | null | undefined): Array<{ langue: string; texte: string }> {
+          if (!value) {
+            return []; // Par défaut : tableau vide
+          }
+
           try {
-            libelle = JSON.parse(dbRateType.libelle);
+            const parsed = JSON.parse(value);
+            
+            // Si c'est déjà un tableau Multilingue[], l'utiliser tel quel
+            if (Array.isArray(parsed)) {
+              // Vérifier que c'est bien un tableau de Multilingue
+              if (parsed.every(item => typeof item === 'object' && item !== null && 'langue' in item && 'texte' in item)) {
+                return parsed as Array<{ langue: string; texte: string }>;
+              }
+              // Sinon, essayer de convertir
+              return parsed.map((item) => {
+                if (typeof item === 'object' && item !== null && 'langue' in item && 'texte' in item) {
+                  return { langue: String(item.langue), texte: String(item.texte) };
+                }
+                // Si c'est une chaîne, utiliser 'fr' par défaut
+                return { langue: 'fr', texte: String(item) };
+              });
+            }
+            
+            // Si c'est un objet {fr: "...", en: "..."}, le convertir en tableau
+            if (typeof parsed === 'object' && parsed !== null) {
+              return Object.entries(parsed).map(([langue, texte]) => ({
+                langue,
+                texte: String(texte)
+              }));
+            }
+            
+            // Si c'est une chaîne, créer un tableau avec langue 'fr'
+            if (typeof parsed === 'string') {
+              return [{ langue: 'fr', texte: parsed }];
+            }
+            
+            // Format inconnu, retourner tableau vide
+            return [];
           } catch {
-            libelle = dbRateType.libelle;
+            // Si le parsing échoue, utiliser la valeur brute comme texte français
+            return [{ langue: 'fr', texte: String(value) }];
           }
         }
 
-        // Parser la description JSON si présente
-        let description: any = undefined;
-        if (dbRateType.description) {
-          try {
-            description = JSON.parse(dbRateType.description);
-          } catch {
-            description = dbRateType.description;
-          }
-        }
+        // Normaliser le libellé (toujours un tableau, même vide)
+        const libelle = normalizeMultilingue(dbRateType.libelle);
+
+        // Normaliser la description (toujours un tableau, même vide - OBLIGATOIRE pour OpenPro)
+        const description = normalizeMultilingue(dbRateType.description);
 
         // Créer dans OpenPro
         const createResult = await openProClient.createRateType(SUPPLIER_ID, {
-          libelle,
-          description,
+          libelle,      // Toujours un tableau Multilingue[], même vide
+          description,  // Toujours un tableau Multilingue[], même vide (OBLIGATOIRE)
           ordre: dbRateType.ordre ?? 0  // OpenPro requiert un nombre, utiliser 0 par défaut
         });
 

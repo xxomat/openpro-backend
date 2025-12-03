@@ -22,17 +22,34 @@ export async function mapOpenProDossierToBooking(
   dossier: Booking,
   env: Env
 ): Promise<IBookingDisplay> {
-  // Construire le nom complet du client
+  const dossierData = dossier as any;
+  
+  // Extraire les dates depuis le premier hébergement
+  // Note: Un dossier peut avoir plusieurs hébergements, on prend le premier
+  const listeHebergement = dossierData.listeHebergement || [];
+  const firstHebergement = listeHebergement[0];
+  
+  if (!firstHebergement?.sejour?.debut || !firstHebergement?.sejour?.fin) {
+    throw new Error('Missing sejour dates in booking dossier');
+  }
+
+  const arrivalDate = firstHebergement.sejour.debut;
+  const departureDate = firstHebergement.sejour.fin;
+
+  // Construire le nom complet du client depuis contact
   const clientNameParts: string[] = [];
-  const client = dossier.client as any;
-  if (client?.prenom) clientNameParts.push(client.prenom);
-  if (client?.nom) clientNameParts.push(client.nom);
+  const contact = dossierData.contact;
+  if (contact?.prenom) clientNameParts.push(contact.prenom);
+  if (contact?.nom) clientNameParts.push(contact.nom);
   const clientName = clientNameParts.length > 0 ? clientNameParts.join(' ') : undefined;
 
   // Trouver l'hébergement correspondant dans la DB
-  let accommodationId: number | string = (dossier.idHebergement as any) || 0;
-  if (dossier.idHebergement) {
-    const accommodation = await findAccommodationByOpenProId((dossier.idHebergement as any), env);
+  let accommodationId: number | string = firstHebergement.cleHebergement?.idHebergement || 0;
+  if (firstHebergement.cleHebergement?.idHebergement) {
+    const accommodation = await findAccommodationByOpenProId(
+      firstHebergement.cleHebergement.idHebergement, 
+      env
+    );
     if (accommodation) {
       accommodationId = accommodation.id; // Utiliser l'ID interne de la DB
     }
@@ -43,45 +60,53 @@ export async function mapOpenProDossierToBooking(
   let bookingStatus: BookingStatus = BookingStatus.Confirmed;
   
   // Si le dossier a un statut d'annulation, marquer comme "Cancelled"
-  // (à adapter selon la structure réelle des données OpenPro)
-  const statut = (dossier.statut as any);
+  const statut = dossierData.statut;
   if (statut === 'annule' || statut === 'annulé' || statut === 'annulee') {
     bookingStatus = BookingStatus.Cancelled;
   }
 
   // Utiliser idDossier comme reference
-  const reference = (dossier.idDossier as any) ? String(dossier.idDossier) : undefined;
+  const reference = dossierData.cleDossier?.idDossier 
+    ? String(dossierData.cleDossier.idDossier) 
+    : undefined;
+
+  // Extraire le montant et autres infos depuis le premier hébergement
+  const totalAmount = firstHebergement.montant;
+  const numberOfPersons = firstHebergement.pax?.nbPers;
+  const numberOfNights = arrivalDate && departureDate 
+    ? Math.ceil((new Date(departureDate).getTime() - new Date(arrivalDate).getTime()) / (1000 * 60 * 60 * 24))
+    : undefined;
 
   return {
-    bookingId: (dossier.idDossier as any) || 0,
+    bookingId: dossierData.cleDossier?.idDossier || 0,
     accommodationId,
-    arrivalDate: (dossier.dateArrivee as any) || '',
-    departureDate: (dossier.dateDepart as any) || '',
+    arrivalDate,
+    departureDate,
     reference,
     clientName,
-    clientTitle: client?.civilite,
-    clientEmail: client?.email,
-    clientPhone: client?.telephone,
-    clientNotes: client?.remarques,
-    clientAddress: client?.adresse,
-    clientPostalCode: client?.codePostal,
-    clientCity: client?.ville,
-    clientCountry: client?.pays,
-    clientBirthDate: client?.dateNaissance,
-    clientNationality: client?.nationalite,
-    clientProfession: client?.profession,
-    clientCompany: client?.societe,
-    clientSiret: client?.siret,
-    clientVat: client?.tvaIntracommunautaire,
-    clientLanguage: client?.langue,
-    clientNewsletter: client?.newsletter,
-    clientTermsAccepted: client?.cgvAcceptees,
-    totalAmount: (dossier.montant as any) || undefined,
-    numberOfPersons: (dossier.nbPersonnes as any) || undefined,
-    numberOfNights: (dossier.nbNuits as any) || undefined,
-    rateTypeLabel: (dossier.typeTarif as any)?.libelle,
-    currency: (dossier.devise as any),
-    creationDate: (dossier.dateCreation as any),
+    clientTitle: contact?.civilite,
+    clientEmail: contact?.email,
+    clientPhone: contact?.telephone1,
+    clientNotes: contact?.remarques ?? undefined,
+    clientAddress: contact?.adresse,
+    clientPostalCode: contact?.codePostal,
+    clientCity: contact?.ville,
+    clientCountry: contact?.pays,
+    clientBirthDate: contact?.dateNaissance,
+    clientNationality: contact?.nationalite,
+    clientProfession: contact?.profession,
+    clientCompany: contact?.societe ?? undefined,
+    clientSiret: contact?.siret,
+    clientVat: contact?.tvaIntracommunautaire,
+    clientLanguage: contact?.langue,
+    clientNewsletter: contact?.newsletter,
+    clientTermsAccepted: contact?.cgvAcceptees,
+    totalAmount,
+    numberOfPersons,
+    numberOfNights,
+    rateTypeLabel: firstHebergement.tarif?.typeTarif?.libelle,
+    currency: dossierData.devise,
+    creationDate: dossierData.dateCreation,
     reservationPlatform: PlateformeReservation.OpenPro,
     bookingStatus,
     isPendingSync: false,
