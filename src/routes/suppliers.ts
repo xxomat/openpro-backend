@@ -485,12 +485,13 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
     }
     
     try {
-      // Supprimer dans OpenPro
+      // Supprimer d'abord en DB (cela supprime aussi toutes les données tarifaires associées)
+      // pour chaque hébergement associé à ce plan tarifaire
+      await deleteRateType(idTypeTarif, env);
+      
+      // Ensuite, supprimer dans OpenPro
       const openProClient = getOpenProClient(env);
       await openProClient.deleteRateType(SUPPLIER_ID, idTypeTarif);
-      
-      // Supprimer en DB
-      await deleteRateType(idTypeTarif, env);
       
       logger.info(`Deleted rate type ${idTypeTarif} from DB and OpenPro`);
       return jsonResponse({ success: true });
