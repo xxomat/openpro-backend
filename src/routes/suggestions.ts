@@ -11,33 +11,24 @@ import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { getSuggestionsBySupplier, updateSuggestionStatus } from '../services/ai/suggestionStorage.js';
 import { generatePricingSuggestions } from '../services/ai/suggestionEngine.js';
 import { saveSuggestions } from '../services/ai/suggestionStorage.js';
-import { getOpenProClient } from '../services/openProClient.js';
+import { loadAccommodationData } from '../services/openpro/accommodationDataService.js';
+import { loadAccommodationData } from '../services/openpro/accommodationDataService.js';
+import { loadStockForAccommodation } from '../services/openpro/stockService.js';
+import { findAccommodationByOpenProId } from '../services/openpro/accommodationService.js';
 import { createLogger } from '../index.js';
 import type { ISuggestionRequest } from '../types/suggestions.js';
 
 /**
- * Normalise les données de tarifs depuis l'API vers un format simplifié
+ * Normalise les données de tarifs depuis la DB vers un format simplifié
  */
-function normalizeRates(rates: unknown): Record<string, number> {
+function normalizeRatesFromDb(data: Record<string, Record<number, any>>): Record<string, number> {
   const normalized: Record<string, number> = {};
-  const ratesData = rates as any;
-  const tarifs = ratesData.tarifs || ratesData.periodes || [];
   
-  for (const tarif of tarifs) {
-    const prix = tarif.prix || tarif.tarifPax?.prix || tarif.prixPax?.prix;
-    const debut = tarif.debut || tarif.dateDebut;
-    const fin = tarif.fin || tarif.dateFin;
-    
-    if (debut && fin && prix != null) {
-      const startDate = new Date(debut + 'T00:00:00');
-      const endDate = new Date(fin + 'T23:59:59');
-      const currentDate = new Date(startDate);
-      
-      while (currentDate <= endDate) {
-        const dateKey = currentDate.toISOString().split('T')[0];
-        normalized[dateKey] = Number(prix);
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
+  // Prendre le premier type de tarif disponible pour chaque date
+  for (const [date, rateTypes] of Object.entries(data)) {
+    const firstRateType = Object.values(rateTypes)[0];
+    if (firstRateType && firstRateType.prix_nuitee != null) {
+      normalized[date] = Number(firstRateType.prix_nuitee);
     }
   }
   
@@ -45,22 +36,11 @@ function normalizeRates(rates: unknown): Record<string, number> {
 }
 
 /**
- * Normalise les données de stock depuis l'API vers un format simplifié
+ * Normalise les données de stock depuis la DB vers un format simplifié
  */
-function normalizeStock(stock: unknown): Record<string, number> {
-  const normalized: Record<string, number> = {};
-  const stockData = stock as any;
-  const jours = stockData.jours || stockData.stock || [];
-  
-  for (const j of jours) {
-    const date = j.date || j.jour;
-    const dispo = j.dispo || j.stock || 0;
-    if (date) {
-      normalized[String(date)] = Number(dispo);
-    }
-  }
-  
-  return normalized;
+function normalizeStockFromDb(stock: Record<string, number>): Record<string, number> {
+  // Le stock est déjà au bon format depuis loadStockForAccommodation
+  return stock;
 }
 
 /**
@@ -148,12 +128,16 @@ export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx
       const debut = today.toISOString().split('T')[0];
       const fin = endDate.toISOString().split('T')[0];
       
-      const openProClient = getOpenProClient(env);
+      // Trouver l'ID interne de l'hébergement depuis son ID OpenPro
+      const accommodation = await findAccommodationByOpenProId(idHebergement, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with OpenPro ID ${idHebergement} not found`, 404);
+      }
       
-      // Charger les données contextuelles
-      const [rates, stock] = await Promise.all([
-        openProClient.getRates(idFournisseur, idHebergement, { debut, fin }),
-        openProClient.getStock(idFournisseur, idHebergement, { debut, fin })
+      // Charger les données contextuelles depuis la DB
+      const [ratesData, stock] = await Promise.all([
+        loadAccommodationData(accommodation.id, debut, fin, env),
+        loadStockForAccommodation(idFournisseur, idHebergement, debut, fin, env)
       ]);
       
       // Préparer la requête d'analyse
@@ -161,8 +145,8 @@ export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx
         supplierId: idFournisseur,
         accommodationId: idHebergement,
         recentBookings: [],
-        currentRates: normalizeRates(rates),
-        currentStock: normalizeStock(stock),
+        currentRates: normalizeRatesFromDb(ratesData),
+        currentStock: normalizeStockFromDb(stock),
       };
       
       // Générer les suggestions

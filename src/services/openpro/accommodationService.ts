@@ -35,21 +35,23 @@ interface ExternalIdRow {
 /**
  * Crée un hébergement en DB
  * 
- * L'hébergement doit avoir un ID pour la plateforme "Directe" (obligatoire, fourni par l'admin).
+ * L'ID Directe (UUID) doit être fourni dans data.ids[PlateformeReservation.Directe]
+ * et sera utilisé comme clé primaire (id) dans la table accommodations.
  */
 export async function createAccommodation(
   data: {
     nom: string;
-    ids: Record<PlateformeReservation, string> & { [PlateformeReservation.Directe]: string };
+    ids: Partial<Record<PlateformeReservation, string>> & { [PlateformeReservation.Directe]: string };
   },
   env: Env
 ): Promise<IAccommodation> {
-  // Vérifier que l'ID Directe est fourni
+  // Vérifier que l'ID Directe est fourni (GUID généré côté frontend)
   if (!data.ids || !data.ids[PlateformeReservation.Directe]) {
     throw new Error('L\'ID pour la plateforme "Directe" est obligatoire');
   }
 
-  const id = crypto.randomUUID();
+  // Utiliser l'ID Directe fourni comme clé primaire
+  const id = data.ids[PlateformeReservation.Directe];
   const now = new Date().toISOString();
 
   const ids = data.ids;
@@ -126,10 +128,11 @@ export async function updateAccommodation(
     `).bind(...values).run();
   }
 
-  // Mettre à jour les IDs externes
+  // Mettre à jour les IDs externes (ignorer Directe qui est l'ID interne et ne peut pas être modifié)
   if (data.ids) {
     for (const [platform, externalId] of Object.entries(data.ids)) {
-      if (externalId) {
+      if (externalId && platform !== PlateformeReservation.Directe) {
+        // L'ID Directe est l'ID interne (UUID) et ne peut pas être modifié
         await setAccommodationExternalId(id, platform, externalId, env);
       }
     }

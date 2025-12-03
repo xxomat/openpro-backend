@@ -147,7 +147,7 @@ export async function loadRateTypes(
     return [];
   }
 
-  return (result.results as RateTypeRow[]).map(row => {
+  return (result.results as unknown as RateTypeRow[]).map(row => {
     // Parser le libellé JSON si présent
     let label: unknown = undefined;
     if (row.libelle) {
@@ -158,17 +158,41 @@ export async function loadRateTypes(
       }
     }
 
+    // Parser la description JSON si présente
+    let description: unknown = undefined;
+    if (row.description) {
+      try {
+        description = JSON.parse(row.description);
+      } catch {
+        // Si ce n'est pas du JSON valide, traiter comme une chaîne simple
+        description = row.description;
+      }
+    }
+
+    // Extraire descriptionFr pour compatibilité (mais on retourne aussi description complète)
+    let descriptionFr: string | undefined = undefined;
+    if (description) {
+      if (typeof description === 'string') {
+        descriptionFr = description;
+      } else if (typeof description === 'object' && description !== null) {
+        if (Array.isArray(description)) {
+          // Format tableau Multilingue[]
+          const frItem = description.find((item: any) => 
+            item && typeof item === 'object' && (item.langue === 'fr' || item.langue === 'FR')
+          );
+          descriptionFr = frItem?.texte;
+        } else {
+          // Format objet { fr: "...", en: "..." }
+          descriptionFr = (description as any).fr || (description as any).FR;
+        }
+      }
+    }
+
     return {
       rateTypeId: row.id_type_tarif!,  // Non-null car filtré par WHERE
       label,
-      descriptionFr: row.description ? (() => {
-        try {
-          const desc = JSON.parse(row.description);
-          return typeof desc === 'string' ? desc : desc.fr || desc.FR || undefined;
-        } catch {
-          return row.description;
-        }
-      })() : undefined,
+      description, // Description complète au format multilingue
+      descriptionFr, // Texte français uniquement (pour compatibilité)
       order: row.ordre || undefined
     };
   });
@@ -327,7 +351,7 @@ export async function loadRateTypesForAccommodation(
     return [];
   }
 
-  return (result.results as RateTypeRow[]).map(row => {
+  return (result.results as unknown as RateTypeRow[]).map(row => {
     // Filtrer les plans tarifaires sans id_type_tarif
     if (row.id_type_tarif === null) {
       return null;
@@ -342,19 +366,40 @@ export async function loadRateTypesForAccommodation(
       }
     }
 
+    // Parser la description JSON si présente
+    let description: unknown = undefined;
+    if (row.description) {
+      try {
+        description = JSON.parse(row.description);
+      } catch {
+        description = row.description;
+      }
+    }
+
+    // Extraire descriptionFr pour compatibilité
+    let descriptionFr: string | undefined = undefined;
+    if (description) {
+      if (typeof description === 'string') {
+        descriptionFr = description;
+      } else if (typeof description === 'object' && description !== null) {
+        if (Array.isArray(description)) {
+          const frItem = description.find((item: any) => 
+            item && typeof item === 'object' && (item.langue === 'fr' || item.langue === 'FR')
+          );
+          descriptionFr = frItem?.texte;
+        } else {
+          descriptionFr = (description as any).fr || (description as any).FR;
+        }
+      }
+    }
+
     return {
       rateTypeId: row.id_type_tarif,
       label,
-      descriptionFr: row.description ? (() => {
-        try {
-          const desc = JSON.parse(row.description);
-          return typeof desc === 'string' ? desc : desc.fr || desc.FR || undefined;
-        } catch {
-          return row.description;
-        }
-      })() : undefined,
+      description, // Description complète au format multilingue
+      descriptionFr, // Texte français uniquement (pour compatibilité)
       order: row.ordre || undefined
     };
-  }).filter((rt): rt is IRateType => rt !== null);
+  }).filter((rt) => rt !== null && rt.rateTypeId !== null) as IRateType[];
 }
 

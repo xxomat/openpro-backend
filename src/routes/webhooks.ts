@@ -43,9 +43,19 @@ function normalizeRates(rates: unknown): Record<string, number> {
 }
 
 /**
- * Normalise les données de stock depuis l'API vers un format simplifié
+ * Normalise les données de stock depuis la DB ou l'API vers un format simplifié
  */
 function normalizeStock(stock: unknown): Record<string, number> {
+  // Si c'est déjà un Record<string, number> (depuis la DB), le retourner tel quel
+  if (stock && typeof stock === 'object' && !Array.isArray(stock)) {
+    const stockRecord = stock as Record<string, unknown>;
+    // Vérifier si c'est déjà au format attendu (clés sont des dates)
+    if (Object.keys(stockRecord).every(key => /^\d{4}-\d{2}-\d{2}$/.test(key))) {
+      return stockRecord as Record<string, number>;
+    }
+  }
+  
+  // Sinon, normaliser depuis l'ancien format API
   const normalized: Record<string, number> = {};
   const stockData = stock as any;
   const jours = stockData.jours || stockData.stock || [];
@@ -218,14 +228,39 @@ export function webhooksRouter(router: typeof Router.prototype, env: Env, ctx: R
       const debut = today.toISOString().split('T')[0];
       const fin = endDate.toISOString().split('T')[0];
       
-      const openProClient = getOpenProClient(env);
+      // Trouver l'ID interne de l'hébergement depuis son ID OpenPro
+      const { findAccommodationByOpenProId } = await import('../services/openpro/accommodationService.js');
+      const accommodation = await findAccommodationByOpenProId(booking.idHebergement, env);
+      if (!accommodation) {
+        logger.warn(`Accommodation with OpenPro ID ${booking.idHebergement} not found in DB`);
+        // Continuer quand même avec les données disponibles
+      }
       
-      // Charger les données contextuelles en parallèle
-      const [rates, stock, recentBookings] = await Promise.all([
-        openProClient.getRates(booking.idFournisseur, booking.idHebergement, { debut, fin }),
-        openProClient.getStock(booking.idFournisseur, booking.idHebergement, { debut, fin }),
+      // Charger les données contextuelles depuis la DB
+      const { loadAccommodationData } = await import('../services/openpro/accommodationDataService.js');
+      const { loadStockForAccommodation } = await import('../services/openpro/stockService.js');
+      
+      const [ratesData, stock, recentBookings] = await Promise.all([
+        accommodation 
+          ? loadAccommodationData(accommodation.id, debut, fin, env)
+          : Promise.resolve({}),
+        loadStockForAccommodation(booking.idFournisseur, booking.idHebergement, debut, fin, env),
         loadRecentBookings(booking.idFournisseur, booking.idHebergement, env)
       ]);
+      
+      // Normaliser les tarifs depuis la DB
+      const rates: any = { tarifs: [] };
+      for (const [date, rateTypes] of Object.entries(ratesData)) {
+        for (const [rateTypeId, data] of Object.entries(rateTypes)) {
+          if (data.prix_nuitee != null) {
+            rates.tarifs.push({
+              debut: date,
+              fin: date,
+              prix: data.prix_nuitee
+            });
+          }
+        }
+      }
       
       // Préparer les données pour l'analyse
       const analysisRequest: ISuggestionRequest = {
@@ -243,7 +278,7 @@ export function webhooksRouter(router: typeof Router.prototype, env: Env, ctx: R
             timestamp: new Date()
           }
         ],
-        currentRates: normalizeRates(rates),
+        currentRates: normalizeRates(rates), // rates est déjà normalisé depuis la DB
         currentStock: normalizeStock(stock),
       };
       

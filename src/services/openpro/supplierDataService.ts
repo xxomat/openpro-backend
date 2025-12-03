@@ -10,16 +10,14 @@
 
 import type { IAccommodation, ISupplierData } from '../../types/api.js';
 import { formatDate } from '../../utils/dateUtils.js';
-import { getAccommodations } from './accommodationService.js';
+import { PlateformeReservation } from '../../types/api.js';
 import { loadStockForAccommodation } from './stockService.js';
 import { buildRateTypesList } from './rateTypeService.js';
 import { loadRateTypes as loadRateTypesFromDb } from './rateTypeDbService.js';
 import { loadRatesForAccommodation } from './rateService.js';
 import { loadBookingsForAccommodation } from './bookingService.js';
-import { loadLocalBookingsForAccommodation } from './localBookingService.js';
-import { getOpenProClient } from '../openProClient.js';
+import { loadAccommodationRateTypeLinks } from './rateTypeDbService.js';
 import type { Env } from '../../index.js';
-import { transformAccommodationRateTypeLinksResponse } from '../../utils/transformers.js';
 
 /**
  * Charge toutes les données (stock, tarifs, types de tarifs) pour un fournisseur
@@ -89,34 +87,49 @@ export async function getSupplierData(
   for (const acc of accommodationsList) {
     if (signal?.aborted) throw new Error('Cancelled');
     
-    // Charger les liaisons entre hébergement et types de tarif
+    // Extraire l'ID OpenPro depuis ids
+    const idOpenPro = acc.ids[PlateformeReservation.OpenPro];
+    if (!idOpenPro) {
+      // Hébergement sans ID OpenPro, initialiser avec des valeurs vides
+      const accommodationIdNum = parseInt(acc.id, 10) || 0;
+      nextRateTypeLinks[accommodationIdNum] = [];
+      nextStock[accommodationIdNum] = {};
+      nextRates[accommodationIdNum] = {};
+      nextPromo[accommodationIdNum] = {};
+      nextRateTypes[accommodationIdNum] = {};
+      nextDureeMin[accommodationIdNum] = {};
+      nextArriveeAutorisee[accommodationIdNum] = {};
+      nextBookings[accommodationIdNum] = [];
+      continue;
+    }
+    
+    const accommodationIdNum = parseInt(idOpenPro, 10);
+    if (isNaN(accommodationIdNum)) {
+      console.warn(`Invalid OpenPro ID for accommodation ${acc.id}: ${idOpenPro}`);
+      continue;
+    }
+    
+    // Charger les liaisons entre hébergement et types de tarif depuis la DB
     try {
-      const openProClient = getOpenProClient(env);
-      const linksResponse = await openProClient.listAccommodationRateTypeLinks(idFournisseur, acc.accommodationId);
       if (signal?.aborted) throw new Error('Cancelled');
       
-      // Transformer la réponse avec class-transformer
-      const apiLinksResponse = transformAccommodationRateTypeLinksResponse(linksResponse);
-      const liaisons = apiLinksResponse.accommodationRateTypeLinks ?? apiLinksResponse.data?.accommodationRateTypeLinks ?? [];
-      
-      // Extraire les IDs des types de tarif liés
-      nextRateTypeLinks[acc.accommodationId] = liaisons
-        .map((l) => Number(l.rateTypeId))
-        .filter((id: number) => !isNaN(id));
+      // Charger les liens depuis la DB (utiliser l'ID interne)
+      const rateTypeIds = await loadAccommodationRateTypeLinks(acc.id, env);
+      nextRateTypeLinks[accommodationIdNum] = rateTypeIds;
     } catch {
       // Ignorer les erreurs de liaisons, initialiser avec un array vide
-      nextRateTypeLinks[acc.accommodationId] = [];
+      nextRateTypeLinks[accommodationIdNum] = [];
     }
     
     // Charger le stock
-    const mapStock = await loadStockForAccommodation(idFournisseur, acc.accommodationId, debut, fin, env, signal);
-    nextStock[acc.accommodationId] = mapStock;
+    const mapStock = await loadStockForAccommodation(idFournisseur, accommodationIdNum, debut, fin, env, signal);
+    nextStock[accommodationIdNum] = mapStock;
 
     // Charger les tarifs, promotions, types et durées minimales
     try {
       const ratesData = await loadRatesForAccommodation(
         idFournisseur,
-        acc.accommodationId,
+        accommodationIdNum,
         debut,
         fin,
         discoveredRateTypes,
@@ -124,43 +137,35 @@ export async function getSupplierData(
         signal
       );
       
-      nextRates[acc.accommodationId] = ratesData.rates;
-      nextPromo[acc.accommodationId] = ratesData.promo;
-      nextRateTypes[acc.accommodationId] = ratesData.rateTypes;
-      nextDureeMin[acc.accommodationId] = ratesData.dureeMin;
-      nextArriveeAutorisee[acc.accommodationId] = ratesData.arriveeAutorisee;
+      nextRates[accommodationIdNum] = ratesData.rates;
+      nextPromo[accommodationIdNum] = ratesData.promo;
+      nextRateTypes[accommodationIdNum] = ratesData.rateTypes;
+      nextDureeMin[accommodationIdNum] = ratesData.dureeMin;
+      nextArriveeAutorisee[accommodationIdNum] = ratesData.arriveeAutorisee;
     } catch (error) {
       // Logger l'erreur pour le débogage mais continuer
-      console.error(`Error loading rates for accommodation ${acc.accommodationId}:`, error);
+      console.error(`Error loading rates for accommodation ${accommodationIdNum}:`, error);
       // Initialiser avec des objets vides pour éviter undefined
-      nextRates[acc.accommodationId] = {};
-      nextPromo[acc.accommodationId] = {};
-      nextRateTypes[acc.accommodationId] = {};
-      nextDureeMin[acc.accommodationId] = {};
-      nextArriveeAutorisee[acc.accommodationId] = {};
+      nextRates[accommodationIdNum] = {};
+      nextPromo[accommodationIdNum] = {};
+      nextRateTypes[accommodationIdNum] = {};
+      nextDureeMin[accommodationIdNum] = {};
+      nextArriveeAutorisee[accommodationIdNum] = {};
     }
 
     // Charger les réservations (toutes les réservations, pas de filtre par dates)
     try {
-      // Charger les réservations locales pour cet hébergement
-      const localBookings = await loadLocalBookingsForAccommodation(
-        idFournisseur,
-        acc.accommodationId,
-        env
-      );
-      
-      // Charger les réservations OpenPro et fusionner avec les locales
+      // Charger les réservations depuis la DB (DB-first)
       const bookings = await loadBookingsForAccommodation(
         idFournisseur,
-        acc.accommodationId,
+        accommodationIdNum,
         env,
-        signal,
-        localBookings
+        signal
       );
-      nextBookings[acc.accommodationId] = bookings;
+      nextBookings[accommodationIdNum] = bookings;
     } catch {
       // Ignorer les erreurs de réservations pour l'instant
-      nextBookings[acc.accommodationId] = [];
+      nextBookings[accommodationIdNum] = [];
     }
   }
   

@@ -50,7 +50,8 @@ export interface IAccommodationLegacy {
 export interface IRateType {
   rateTypeId: number;
   label?: unknown;
-  descriptionFr?: string;
+  description?: unknown; // Description complète au format multilingue (tableau ou objet)
+  descriptionFr?: string; // Texte français uniquement (pour compatibilité)
   order?: number;
 }
 

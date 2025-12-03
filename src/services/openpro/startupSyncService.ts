@@ -57,6 +57,17 @@ import { loadAllAccommodations } from './accommodationService.js';
 import { exportAccommodationDataToOpenPro } from './accommodationDataService.js';
 import { updateRateTypeOpenProId } from './rateTypeDbService.js';
 import { loadAccommodationRateTypeLinks } from './rateTypeDbService.js';
+import type {
+  BookingSummary,
+  AccommodationHeader,
+  AccommodationListResponse,
+  RateType,
+  RateTypeListResponse,
+  ReponseTypeTarifAjout,
+  ReponseLiaisonHebergementTypeTarifListe,
+  LiaisonHebergementTypeTarif,
+  Multilingue
+} from '@openpro-api-react/client/types.js';
 
 /**
  * Synchronise les réservations OpenPro au démarrage
@@ -93,9 +104,9 @@ export async function syncOpenProBookingsOnStartup(env: Env): Promise<void> {
     console.log(`[StartupSync] Found ${openProBookingsInDb.length} OpenPro bookings in DB`);
 
     // Map des réservations OpenPro par reference (idDossier)
-    const openProBookingsMap = new Map<number, (typeof openProBookings)[0]>();
+    const openProBookingsMap = new Map<number, BookingSummary>();
     for (const booking of openProBookings) {
-      const idDossier = (booking as any).cleDossier?.idDossier;
+      const idDossier = booking.cleDossier?.idDossier;
       if (idDossier) {
         openProBookingsMap.set(idDossier, booking);
       }
@@ -111,7 +122,7 @@ export async function syncOpenProBookingsOnStartup(env: Env): Promise<void> {
 
     // Traiter chaque réservation OpenPro
     for (const openProBooking of openProBookings) {
-      const idDossier = (openProBooking as any).cleDossier?.idDossier;
+      const idDossier = openProBooking.cleDossier?.idDossier;
       if (!idDossier) {
         continue;
       }
@@ -327,17 +338,17 @@ export async function verifyAccommodationsOnStartup(env: Env): Promise<void> {
     console.log(`[StartupSync] Found ${dbAccommodationsWithOpenPro.length} accommodations with OpenPro ID in DB`);
 
     // 2. Fetcher tous les hébergements depuis OpenPro
-    const openProAccommodationsResponse = await openProClient.listAccommodations(SUPPLIER_ID);
-    const openProAccommodations = (openProAccommodationsResponse as any)?.listeHebergement || [];
+    const openProAccommodationsResponse: AccommodationListResponse = await openProClient.listAccommodations(SUPPLIER_ID);
+    const openProAccommodations: AccommodationHeader[] = openProAccommodationsResponse.listeHebergement || [];
 
     console.log(`[StartupSync] Found ${openProAccommodations.length} accommodations in OpenPro`);
 
     // Créer un Set des IDs OpenPro pour recherche rapide
     const openProIds = new Set<number>();
     for (const acc of openProAccommodations) {
-      const idOpenPro = (acc as any).cleHebergement?.idHebergement;
+      const idOpenPro = acc.cleHebergement?.idHebergement;
       if (idOpenPro) {
-        openProIds.add(Number(idOpenPro));
+        openProIds.add(idOpenPro);
       }
     }
 
@@ -395,13 +406,15 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
     const dbRateTypeNames = dbRateTypes.map(rt => {
       if (!rt.libelle) return `(sans nom, ID: ${rt.id})`;
       try {
-        const parsed = JSON.parse(rt.libelle);
+        const parsed: unknown = JSON.parse(rt.libelle);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const frLabel = parsed.find((item: any) => item.langue === 'fr' || item.langue === 'FR');
-          return frLabel?.texte || parsed[0]?.texte || String(parsed[0]) || `(ID: ${rt.id})`;
+          const multilingueArray = parsed as Multilingue[];
+          const frLabel = multilingueArray.find((item: Multilingue) => item.langue === 'fr' || item.langue === 'FR');
+          return frLabel?.texte || multilingueArray[0]?.texte || String(multilingueArray[0]) || `(ID: ${rt.id})`;
         }
         if (typeof parsed === 'object' && parsed !== null) {
-          return parsed.fr || parsed.FR || Object.values(parsed)[0] || `(ID: ${rt.id})`;
+          const parsedObj = parsed as Record<string, string>;
+          return parsedObj.fr || parsedObj.FR || Object.values(parsedObj)[0] || `(ID: ${rt.id})`;
         }
         return String(parsed) || `(ID: ${rt.id})`;
       } catch {
@@ -412,22 +425,24 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
     console.log(`[StartupSync] Found ${dbRateTypes.length} rate types in DB: ${dbRateTypeNames.join(', ')}`);
 
     // 2. Fetcher tous les plans tarifaires depuis OpenPro
-    const openProRateTypesResponse = await openProClient.listRateTypes(SUPPLIER_ID);
-    const openProRateTypes = (openProRateTypesResponse as any)?.typeTarifs || [];
+    const openProRateTypesResponse: RateTypeListResponse = await openProClient.listRateTypes(SUPPLIER_ID);
+    const openProRateTypes: RateType[] = openProRateTypesResponse.typeTarifs || [];
 
     // Extraire les noms des plans tarifaires depuis OpenPro
-    const openProRateTypeNames = openProRateTypes.map((rt: any) => {
-      const idTypeTarif = rt.cleTypeTarif?.idTypeTarif;
+    const openProRateTypeNames = openProRateTypes.map((rt: RateType) => {
+      const idTypeTarif = rt.cleTypeTarif?.idTypeTarif ?? rt.idTypeTarif;
       const idDisplay = idTypeTarif ? `(ID: ${idTypeTarif})` : '(sans ID)';
       if (!rt.libelle) return `(sans nom) ${idDisplay}`;
       
       // Le libellé peut être un tableau Multilingue[] ou un objet
       if (Array.isArray(rt.libelle)) {
-        const frLabel = rt.libelle.find((item: any) => item.langue === 'fr' || item.langue === 'FR');
-        return (frLabel?.texte || rt.libelle[0]?.texte || String(rt.libelle[0]) || '(sans nom)') + ` ${idDisplay}`;
+        const multilingueArray = rt.libelle as Multilingue[];
+        const frLabel = multilingueArray.find((item: Multilingue) => item.langue === 'fr' || item.langue === 'FR');
+        return (frLabel?.texte || multilingueArray[0]?.texte || String(multilingueArray[0]) || '(sans nom)') + ` ${idDisplay}`;
       }
       if (typeof rt.libelle === 'object' && rt.libelle !== null) {
-        return (rt.libelle.fr || rt.libelle.FR || Object.values(rt.libelle)[0] || '(sans nom)') + ` ${idDisplay}`;
+        const libelleObj = rt.libelle as Record<string, string>;
+        return (libelleObj.fr || libelleObj.FR || Object.values(libelleObj)[0] || '(sans nom)') + ` ${idDisplay}`;
       }
       return String(rt.libelle) + ` ${idDisplay}`;
     });
@@ -437,9 +452,9 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
     // Créer un Set des IDs OpenPro pour recherche rapide
     const openProRateTypeIds = new Set<number>();
     for (const rt of openProRateTypes) {
-      const idTypeTarif = (rt as any).cleTypeTarif?.idTypeTarif;
+      const idTypeTarif = rt.cleTypeTarif?.idTypeTarif ?? rt.idTypeTarif;
       if (idTypeTarif) {
-        openProRateTypeIds.add(Number(idTypeTarif));
+        openProRateTypeIds.add(idTypeTarif);
       }
     }
 
@@ -511,14 +526,14 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
         const description = normalizeMultilingue(dbRateType.description);
 
         // Créer dans OpenPro
-        const createResult = await openProClient.createRateType(SUPPLIER_ID, {
+        const createResult: ReponseTypeTarifAjout = await openProClient.createRateType(SUPPLIER_ID, {
           libelle,      // Toujours un tableau Multilingue[], même vide
           description,  // Toujours un tableau Multilingue[], même vide (OBLIGATOIRE)
           ordre: dbRateType.ordre ?? 0  // OpenPro requiert un nombre, utiliser 0 par défaut
         });
 
         // Extraire l'ID OpenPro retourné
-        const idTypeTarif = (createResult as any)?.idTypeTarif || (createResult as any)?.data?.idTypeTarif;
+        const idTypeTarif = createResult.idTypeTarif;
         if (!idTypeTarif) {
           throw new Error('Could not extract idTypeTarif from OpenPro response');
         }
@@ -589,13 +604,13 @@ export async function syncRateTypeLinksOnStartup(env: Env): Promise<void> {
         const dbLinks = await loadAccommodationRateTypeLinks(accommodation.id, env);
 
         // Fetcher les liens depuis OpenPro
-        const openProLinksResponse = await openProClient.listAccommodationRateTypeLinks(SUPPLIER_ID, idOpenPro);
-        const openProLinks = (openProLinksResponse as any)?.liste || [];
+        const openProLinksResponse: ReponseLiaisonHebergementTypeTarifListe = await openProClient.listAccommodationRateTypeLinks(SUPPLIER_ID, idOpenPro);
+        const openProLinks: LiaisonHebergementTypeTarif[] = openProLinksResponse.liaisonHebergementTypeTarifs || [];
         const openProRateTypeIds = new Set<number>();
         for (const link of openProLinks) {
-          const idTypeTarif = (link as any).idTypeTarif;
+          const idTypeTarif = link.idTypeTarif;
           if (idTypeTarif) {
-            openProRateTypeIds.add(Number(idTypeTarif));
+            openProRateTypeIds.add(idTypeTarif);
           }
         }
 

@@ -73,10 +73,12 @@ export function accommodationsRouter(router: typeof Router.prototype, env: Env, 
       return errorResponse('Missing nom', 400);
     }
 
+    // Vérifier que l'ID Directe (GUID) est fourni
     if (!data.ids || !data.ids[PlateformeReservation.Directe]) {
-      return errorResponse('L\'ID pour la plateforme "Directe" est obligatoire', 400);
+      return errorResponse('L\'ID pour la plateforme "Directe" est obligatoire (GUID généré côté frontend)', 400);
     }
 
+    // Vérifier que l'ID OpenPro est fourni
     if (!data.ids || !data.ids[PlateformeReservation.OpenPro]) {
       return errorResponse('L\'ID pour la plateforme "OpenPro" est obligatoire', 400);
     }

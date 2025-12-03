@@ -17,8 +17,7 @@ import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
 import { createLocalBooking, deleteLocalBooking, loadAllBookings } from '../services/openpro/localBookingService.js';
 import { syncBookingToStub } from '../services/openpro/stubSyncService.js';
-import type { IApiTarif } from '../types/apiTypes.js';
-import type { TypeTarifModif } from '@openpro-api-react/client/types.js';
+import type { TypeTarifModif, ReponseTypeTarifAjout } from '@openpro-api-react/client/types.js';
 import { getSupplierId } from '../config/supplier.js';
 import { saveRateType, updateRateTypeOpenProId, deleteRateType, linkRateTypeToAccommodation, unlinkRateTypeFromAccommodation } from '../services/openpro/rateTypeDbService.js';
 import { saveAccommodationStock, saveAccommodationData, exportAccommodationDataToOpenPro } from '../services/openpro/accommodationDataService.js';
@@ -115,60 +114,38 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
     }
     
     try {
-      const openProClient = getOpenProClient(env);
-      const rates = await openProClient.getRates(idFournisseur, idHebergement);
+      // Charger depuis la DB (DB-first)
+      const { findAccommodationByOpenProId } = await import('../services/openpro/accommodationService.js');
+      const { loadAccommodationData } = await import('../services/openpro/accommodationDataService.js');
       
-      // Transformer la réponse avec class-transformer
-      const dataToTransform = (rates && typeof rates === 'object' && 'data' in rates && rates.data) 
-        ? rates.data 
-        : rates;
+      const accommodation = await findAccommodationByOpenProId(idHebergement, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with OpenPro ID ${idHebergement} not found`, 404);
+      }
       
-      const { transformRatesResponse } = await import('../utils/transformers.js');
-      const apiResponse = transformRatesResponse(dataToTransform);
-      const tarifs = apiResponse.rates ?? apiResponse.periods ?? [];
+      // Charger les données tarifaires pour la date spécifiée
+      const ratesData = await loadAccommodationData(accommodation.id, date, date, env);
       
-      // Trouver le tarif correspondant à la date et au type de tarif
-      const dateObj = new Date(date + 'T00:00:00');
-      const matchingTarif = tarifs.find((tarif: IApiTarif) => {
-        const tarifRateTypeId = tarif.rateTypeId ?? tarif?.rateType?.rateTypeId;
-        if (Number(tarifRateTypeId) !== rateTypeId) {
-          return false;
-        }
-        
-        const deb = String(tarif.startDate ?? tarif.startDateAlt ?? '').trim();
-        const fe = String(
-          tarif.endDate ?? 
-          tarif.endDateAlt ?? 
-          (tarif as any)['fin'] ?? 
-          (tarif as any)['fin '] ?? 
-          ''
-        ).trim();
-        
-        if (!deb || !fe) {
-          return false;
-        }
-        
-        const startD = new Date(deb + 'T00:00:00');
-        const endD = new Date(fe + 'T23:59:59');
-        
-        return dateObj >= startD && dateObj <= endD;
-      });
+      // Trouver le tarif pour le type de tarif spécifié
+      const dateData = ratesData[date];
+      if (!dateData) {
+        return errorResponse('No rate found for the specified date', 404);
+      }
       
-      if (!matchingTarif) {
+      const rateData = dateData[rateTypeId];
+      if (!rateData) {
         return errorResponse('No rate found for the specified date and rate type', 404);
       }
       
-      // Retourner le tarif sans les champs debut et fin
-      const { startDate, startDateAlt, endDate, endDateAlt, ...tarifWithoutDates } = matchingTarif;
-      const result = { ...tarifWithoutDates };
-      
-      // Nettoyer les propriétés 'fin' et 'fin ' si elles existent
-      if ('fin' in result) {
-        delete (result as any).fin;
-      }
-      if ('fin ' in result) {
-        delete (result as any)['fin '];
-      }
+      // Formater la réponse au format attendu
+      const result = {
+        rateTypeId,
+        price: rateData.prix_nuitee,
+        arrivalAllowed: rateData.arrivee_autorisee,
+        departureAllowed: rateData.depart_autorise,
+        minDuration: rateData.duree_minimale,
+        maxDuration: rateData.duree_maximale
+      };
       
       return jsonResponse(result);
     } catch (error) {
@@ -304,56 +281,17 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
     }
     
     try {
-      // Charger depuis la DB en priorité, puis compléter avec OpenPro si nécessaire
+      // Charger depuis la DB (source de vérité)
       const { loadRateTypes } = await import('../services/openpro/rateTypeDbService.js');
       const dbRateTypes = await loadRateTypes(env);
       
-      // Si on a des rate types en DB, les retourner
-      if (dbRateTypes.length > 0) {
-        return jsonResponse({
-          typeTarifs: dbRateTypes.map(rt => ({
-            idTypeTarif: rt.rateTypeId,
-            libelle: rt.label,
-            description: rt.descriptionFr ? { fr: rt.descriptionFr } : undefined,
-            ordre: rt.order
-          }))
-        });
-      }
-      
-      // Sinon, charger depuis OpenPro (pour compatibilité)
-      const openProClient = getOpenProClient(env);
-      const allRateTypesResponse = await openProClient.listRateTypes(SUPPLIER_ID);
-      
-      logger.info('Raw response from OpenPro API:', JSON.stringify(allRateTypesResponse, null, 2));
-      
-      // Adapter le format de réponse pour correspondre à ce que le frontend attend
-      const apiRateTypesResponse = allRateTypesResponse as unknown as { typeTarifs?: unknown[] };
-      const rawTypeTarifs = apiRateTypesResponse.typeTarifs || [];
-      
-      logger.info(`Found ${rawTypeTarifs.length} raw rate types`);
-      
-      // Normaliser la structure : l'API OpenPro peut retourner cleTypeTarif.idTypeTarif ou idTypeTarif directement
-      const typeTarifs = rawTypeTarifs.map((rt: any) => {
-        const idTypeTarif = rt.cleTypeTarif?.idTypeTarif ?? rt.idTypeTarif;
-        // Ne garder que les champs nécessaires, sans cleTypeTarif
-        return {
-          idTypeTarif: Number(idTypeTarif),
-          libelle: rt.libelle,
-          description: rt.description,
-          ordre: rt.ordre != null ? Number(rt.ordre) : undefined
-        };
-      }).filter((rt: any) => {
-        const isValid = rt.idTypeTarif != null && !isNaN(rt.idTypeTarif);
-        if (!isValid) {
-          logger.warn(`Filtered out invalid rate type:`, JSON.stringify(rt, null, 2));
-        }
-        return isValid;
-      });
-      
-      logger.info(`Returning ${typeTarifs.length} normalized rate types`);
-      
       return jsonResponse({
-        typeTarifs
+        typeTarifs: dbRateTypes.map(rt => ({
+          idTypeTarif: rt.rateTypeId,
+          libelle: rt.label,
+          description: rt.description, // Description complète au format multilingue
+          ordre: rt.order
+        }))
       });
     } catch (error) {
       logger.error('Error fetching rate types', error);
@@ -396,10 +334,10 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
       
       // 2. Créer dans OpenPro
       const openProClient = getOpenProClient(env);
-      const result = await openProClient.createRateType(SUPPLIER_ID, payload.typeTarifModif);
+      const result: ReponseTypeTarifAjout = await openProClient.createRateType(SUPPLIER_ID, payload.typeTarifModif);
       
       // 3. Extraire l'ID OpenPro retourné
-      const idTypeTarif = (result as any)?.idTypeTarif || (result as any)?.data?.idTypeTarif;
+      const idTypeTarif = result.idTypeTarif;
       if (!idTypeTarif) {
         logger.warn('Could not extract idTypeTarif from OpenPro response, rate type saved in DB without OpenPro ID');
         return jsonResponse(result);
@@ -519,9 +457,26 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
     }
     
     try {
-      const openProClient = getOpenProClient(env);
-      const result = await openProClient.listAccommodationRateTypeLinks(idFournisseur, idHebergement);
-      return jsonResponse(result);
+      // Charger depuis la DB (DB-first)
+      const { findAccommodationByOpenProId } = await import('../services/openpro/accommodationService.js');
+      const { loadAccommodationRateTypeLinks } = await import('../services/openpro/rateTypeDbService.js');
+      
+      const accommodation = await findAccommodationByOpenProId(idHebergement, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with OpenPro ID ${idHebergement} not found`, 404);
+      }
+      
+      const rateTypeIds = await loadAccommodationRateTypeLinks(accommodation.id, env);
+      
+      // Formater la réponse au format attendu par le frontend
+      // Le frontend attend { liaisonHebergementTypeTarifs: [{ idFournisseur, idHebergement, idTypeTarif }] }
+      return jsonResponse({
+        liaisonHebergementTypeTarifs: rateTypeIds.map(idTypeTarif => ({
+          idFournisseur,
+          idHebergement,
+          idTypeTarif
+        }))
+      });
     } catch (error) {
       logger.error('Error fetching accommodation rate type links', error);
       return errorResponse(

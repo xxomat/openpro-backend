@@ -34,6 +34,9 @@ export type DiscoveredRateType = {
 /**
  * Charge et découvre les types de tarifs disponibles pour un fournisseur
  * 
+ * @deprecated Cette fonction charge depuis OpenPro et ne doit plus être utilisée.
+ * Utiliser `loadRateTypes` depuis `rateTypeDbService.ts` à la place (DB-first).
+ * 
  * Cette fonction récupère tous les types de tarifs depuis l'API, filtre ceux qui sont
  * liés aux hébergements (via les liaisons), et extrait les libellés et descriptions
  * en français pour chaque type.
@@ -44,6 +47,7 @@ export type DiscoveredRateType = {
  * @returns Map des types de tarifs découverts, indexée par rateTypeId
  * @throws {Error} Peut lever une erreur si le chargement des types de tarifs échoue
  * @throws {DOMException} Peut lever une AbortError si la requête est annulée
+ * @deprecated Utiliser `loadRateTypes` depuis `rateTypeDbService.ts` à la place
  */
 export async function loadRateTypes(
   idFournisseur: number,

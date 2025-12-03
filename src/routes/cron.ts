@@ -11,10 +11,9 @@ import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { createLogger } from '../index.js';
 import { 
-  updateSyncedStatusForLocalBookings
+  loadAllLocalBookings
 } from '../services/openpro/localBookingService.js';
 import { PlateformeReservation } from '../types/api.js';
-import { getOpenProClient } from '../services/openProClient.js';
 import { isStubMode } from '../services/openpro/stubSyncService.js';
 
 /**
@@ -85,209 +84,38 @@ async function validateDirectBookingsSync(env: Env): Promise<{
     obsolete: boolean;
   }> = [];
   
-  const openProClient = getOpenProClient(env);
+  // Charger toutes les réservations locales depuis la DB
+  const allBookings = await loadAllLocalBookings(env);
   
-  // Pour chaque fournisseur, charger les réservations locales et OpenPro, puis comparer
+  // Pour chaque fournisseur, compter les réservations en attente
   for (const idFournisseur of suppliers) {
     try {
-      // Charger TOUTES les réservations locales pour ce fournisseur (pas seulement celles en attente)
+      // Filtrer les réservations pour ce fournisseur
+      const supplierBookings = allBookings.filter(b => {
+        // Vérifier si la réservation appartient à ce fournisseur
+        // Les réservations ont idFournisseur dans la DB mais pas dans IBookingDisplay
+        // On doit charger depuis la DB directement
+        return true; // On va filtrer après
+      });
+      
+      // Charger depuis la DB pour avoir accès à id_fournisseur
       const dbBookings = await env.DB.prepare(`
         SELECT * FROM local_bookings
         WHERE id_fournisseur = ?
       `).bind(idFournisseur).all();
       
-      // Charger toutes les réservations OpenPro pour ce fournisseur
-      const bookingList = await openProClient.listBookings(idFournisseur);
-      const openProBookings: Array<{
-        bookingId: number;
-        accommodationId: number;
-        arrivalDate: string;
-        departureDate: string;
-        reference?: string;
-        reservationPlatform: PlateformeReservation;
-        isPendingSync: boolean;
-        isObsolete: boolean;
-      }> = [];
-      
-      // Convertir les réservations OpenPro en BookingDisplay et filtrer les Direct
-      // Le nouveau format retourne une liste de résumés, il faut charger les détails complets
-      for (const summary of bookingList.liste ?? []) {
-        // Charger les détails complets du dossier
-        const dossier = await openProClient.getBooking(summary.cleDossier.idFournisseur, summary.cleDossier.idDossier);
-        
-        // Le nouveau format peut avoir plusieurs hébergements dans listeHebergement
-        const listeHebergement = dossier.listeHebergement ?? [];
-        
-        for (const hebergementItem of listeHebergement) {
-          if (hebergementItem.sejour?.debut && hebergementItem.sejour?.fin) {
-            // Déterminer la plateforme
-            let plateforme = PlateformeReservation.Unknown;
-            if (dossier.transaction?.transactionResaLocale) {
-              plateforme = PlateformeReservation.Directe;
-            } else if (dossier.transaction?.transactionBooking) {
-              plateforme = PlateformeReservation.BookingCom;
-            } else if (dossier.transaction?.transactionXotelia) {
-              plateforme = PlateformeReservation.Xotelia;
-            } else if (dossier.transaction?.transactionOpenSystem) {
-              plateforme = PlateformeReservation.OpenPro;
-            }
-            
-            if (plateforme === PlateformeReservation.Directe) {
-              const idDossier = dossier.cleDossier.idDossier;
-              // Log pour diagnostic si idDossier est manquant
-              if (!idDossier || idDossier === 0) {
-                console.warn(`[CRON] Direct booking without idDossier:`, {
-                  cleDossier: dossier.cleDossier,
-                  dossierKeys: Object.keys(dossier)
-                });
-              }
-              openProBookings.push({
-                bookingId: idDossier,
-                accommodationId: hebergementItem.cleHebergement.idHebergement,
-                arrivalDate: hebergementItem.sejour.debut,
-                departureDate: hebergementItem.sejour.fin,
-                reference: undefined, // Le nouveau format n'a pas de reference au niveau du dossier
-                reservationPlatform: PlateformeReservation.Directe,
-                isPendingSync: false,
-                isObsolete: false
-              });
-            }
-          }
-        }
-      }
-      
-      // Si pas de réservations locales mais des réservations Direct dans OpenPro, compter les obsolètes
-      if (!dbBookings.results || dbBookings.results.length === 0) {
-        // Pas de réservations locales, toutes les réservations Direct dans OpenPro sont obsolètes
-        // (elles ne sont pas stockées dans la DB, seulement comptées)
-        for (const openProBooking of openProBookings) {
-          obsoleteBookings.push({
-            reference: openProBooking.reference ?? null,
-            dateArrivee: openProBooking.arrivalDate,
-            synced: false,
-            obsolete: true
-          });
-          totalObsoleteCount++;
-          
-          // Log pour diagnostic
-          console.log(`[CRON] Found obsolete booking (no local bookings): bookingId=${openProBooking.bookingId}, ref=${openProBooking.reference}, isStubMode=${isStubMode(env)}`);
-          
-          // Supprimer la réservation obsolète du stub server uniquement si on est en mode stub
-          if (isStubMode(env)) {
-            // Vérifier que l'ID est valide avant de supprimer
-            if (openProBooking.bookingId && openProBooking.bookingId > 0) {
-              try {
-                console.log(`[CRON] Attempting to delete obsolete booking ${openProBooking.bookingId} (ref: ${openProBooking.reference}) from stub-server`);
-                const { deleteBookingFromStubById } = await import('../services/openpro/stubSyncService.js');
-                await deleteBookingFromStubById(
-                  openProBooking.bookingId,
-                  idFournisseur,
-                  env
-                );
-                console.log(`[CRON] Successfully deleted obsolete booking ${openProBooking.bookingId} from stub-server`);
-              } catch (deleteError) {
-                // Ne pas faire échouer le cron si la suppression échoue
-                console.error(`[CRON] Failed to delete obsolete booking ${openProBooking.bookingId} from stub-server:`, deleteError);
-              }
-            } else {
-              console.warn(`[CRON] Cannot delete obsolete booking: invalid bookingId (${openProBooking.bookingId})`);
-            }
-          } else {
-            console.log(`[CRON] Not in stub mode (OPENPRO_BASE_URL=${env.OPENPRO_BASE_URL}), skipping deletion`);
-          }
-        }
-        continue;
-      }
-      
-      // Séparer les réservations en attente et toutes les autres
-      const pendingLocalBookings = dbBookings.results.filter((row: any) => 
+      const pendingBookings = (dbBookings.results || []).filter((row: any) => 
         row.synced_at === null || row.synced_at === undefined
       );
       
-      totalLocalBookingsCount += pendingLocalBookings.length;
+      totalLocalBookingsCount += pendingBookings.length;
+      totalPendingCount += pendingBookings.length;
       
-      // Convertir toutes les réservations locales en BookingDisplay
-      const allSupplierLocalBookings = dbBookings.results.map((row: any) => ({
-        idDossier: 0,
-        idHebergement: row.id_hebergement,
-        dateArrivee: row.date_arrivee,
-        dateDepart: row.date_depart,
-        plateformeReservation: PlateformeReservation.Directe,
-        isPendingSync: row.synced_at === null || row.synced_at === undefined,
-        isObsolete: false // Les réservations dans la DB ne sont jamais obsolètes
-      }));
-      
-      // Convertir seulement les réservations en attente pour la mise à jour synced_at
-      const pendingSupplierLocalBookings = pendingLocalBookings.map((row: any) => ({
-        idDossier: 0,
-        idHebergement: row.id_hebergement,
-        dateArrivee: row.date_arrivee,
-        dateDepart: row.date_depart,
-        plateformeReservation: PlateformeReservation.Directe,
-        isPendingSync: true,
-        isObsolete: false
-      }));
-      
-      // Mettre à jour synced_at pour les réservations synchronisées (seulement celles en attente)
-      if (pendingSupplierLocalBookings.length > 0) {
-        const syncStats = await updateSyncedStatusForLocalBookings(
-          idFournisseur,
-          pendingSupplierLocalBookings,
-          openProBookings,
-          env
-        );
-        totalSyncedCount += syncStats.syncedCount;
-        totalPendingCount += syncStats.pendingCount;
-      }
-      
-      // Détecter les réservations obsolètes (sans les créer dans la DB)
-      // Compter les réservations Direct dans OpenPro qui n'ont pas de correspondance locale
-      for (const openProBooking of openProBookings) {
-        const match = allSupplierLocalBookings.find(localBooking =>
-          localBooking.accommodationId === openProBooking.accommodationId &&
-          localBooking.arrivalDate === openProBooking.arrivalDate &&
-          localBooking.departureDate === openProBooking.departureDate
-        );
-        
-        if (!match) {
-          // Réservation Direct dans OpenPro sans correspondance locale = obsolète
-          // (détectée dynamiquement, pas stockée dans la DB)
-          obsoleteBookings.push({
-            reference: openProBooking.reference ?? null,
-            dateArrivee: openProBooking.arrivalDate,
-            synced: false,
-            obsolete: true
-          });
-          totalObsoleteCount++;
-          
-          // Log pour diagnostic
-          console.log(`[CRON] Found obsolete booking: bookingId=${openProBooking.bookingId}, ref=${openProBooking.reference}, isStubMode=${isStubMode(env)}`);
-          
-          // Supprimer la réservation obsolète du stub server uniquement si on est en mode stub
-          if (isStubMode(env)) {
-            // Vérifier que l'ID est valide avant de supprimer
-            if (openProBooking.bookingId && openProBooking.bookingId > 0) {
-              try {
-                console.log(`[CRON] Attempting to delete obsolete booking ${openProBooking.bookingId} (ref: ${openProBooking.reference}) from stub-server`);
-                const { deleteBookingFromStubById } = await import('../services/openpro/stubSyncService.js');
-                await deleteBookingFromStubById(
-                  openProBooking.bookingId,
-                  idFournisseur,
-                  env
-                );
-                console.log(`[CRON] Successfully deleted obsolete booking ${openProBooking.bookingId} from stub-server`);
-              } catch (deleteError) {
-                // Ne pas faire échouer le cron si la suppression échoue
-                console.error(`[CRON] Failed to delete obsolete booking ${openProBooking.bookingId} from stub-server:`, deleteError);
-              }
-            } else {
-              console.warn(`[CRON] Cannot delete obsolete booking: invalid bookingId (${openProBooking.bookingId})`);
-            }
-          } else {
-            console.log(`[CRON] Not in stub mode (OPENPRO_BASE_URL=${env.OPENPRO_BASE_URL}), skipping deletion`);
-          }
-        }
-      }
+      // Compter les synchronisées
+      const syncedBookings = (dbBookings.results || []).filter((row: any) => 
+        row.synced_at !== null && row.synced_at !== undefined
+      );
+      totalSyncedCount += syncedBookings.length;
       
     } catch (error) {
       console.error(`Error processing supplier ${idFournisseur}:`, error);
@@ -295,32 +123,29 @@ async function validateDirectBookingsSync(env: Env): Promise<{
     }
   }
   
-  // Recharger toutes les réservations locales depuis la DB (les obsolètes ne sont pas dans la DB)
+  // Charger toutes les réservations depuis la DB pour le retour
   const finalBookingsResult = await env.DB.prepare(`
     SELECT reference, date_arrivee, synced_at
     FROM local_bookings
     ORDER BY date_arrivee ASC
   `).all();
-  
+
   const finalBookings = (finalBookingsResult.results || []).map((row: any) => ({
     reference: row.reference || null,
     dateArrivee: row.date_arrivee,
     synced: row.synced_at !== null && row.synced_at !== undefined,
-    obsolete: false // Les réservations dans la DB ne sont jamais obsolètes
+    obsolete: false // Les réservations dans la DB ne sont jamais obsolètes (DB-first)
   }));
-  
-  // Ajouter les réservations obsolètes détectées au tableau final
-  const allBookings = [...finalBookings, ...obsoleteBookings];
-  
+
   // Trier par date d'arrivée
-  allBookings.sort((a, b) => a.dateArrivee.localeCompare(b.dateArrivee));
-  
+  finalBookings.sort((a, b) => a.dateArrivee.localeCompare(b.dateArrivee));
+
   return {
     localBookingsCount: totalLocalBookingsCount,
     syncedCount: totalSyncedCount,
     pendingCount: totalPendingCount,
-    obsoleteCount: totalObsoleteCount, // Compté dynamiquement depuis OpenPro vs DB
-    bookings: allBookings
+    obsoleteCount: 0, // Plus de détection d'obsolètes depuis OpenPro (DB-first)
+    bookings: finalBookings
   };
 }
 
