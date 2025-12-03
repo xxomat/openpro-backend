@@ -4,12 +4,12 @@
  * Gère la configuration iCal (import/export URLs) et l'export des flux iCal.
  */
 
-import type { IRequest, Router } from 'itty-router';
+import type { IRequest } from 'itty-router';
+import type { Router } from 'itty-router';
 import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { createLogger } from '../index.js';
 import {
-  loadIcalSyncConfig,
   saveIcalSyncConfig,
   deleteIcalSyncConfig,
   loadAllIcalSyncConfigs,
@@ -19,7 +19,7 @@ import {
 /**
  * Enregistre les routes iCal
  */
-export function icalRouter(router: Router, env: Env, ctx: RequestContext) {
+export function icalRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
 
   // GET /api/ical-config/:idHebergement - Liste toutes les configurations iCal pour un hébergement

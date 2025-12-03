@@ -65,9 +65,9 @@ function normalizeStock(stock: unknown): Record<string, number> {
  * Charge les réservations récentes pour un hébergement
  */
 async function loadRecentBookings(
-  supplierId: number,
-  accommodationId: number,
-  env: Env
+  _supplierId: number,
+  _accommodationId: number,
+  _env: Env
 ): Promise<IBookingAnalysis[]> {
   // TODO: Charger depuis D1 les réservations locales + OpenPro
   return [];
@@ -76,7 +76,7 @@ async function loadRecentBookings(
 /**
  * Enregistre les routes des webhooks
  */
-export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
+export function webhooksRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
   
   // GET /api/webhooks/openpro/booking?idFournisseur=X&idDossier=Y
@@ -97,7 +97,8 @@ export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     // Vérifier que idFournisseur correspond à SUPPLIER_ID
-    const { SUPPLIER_ID } = await import('../config/supplier.js');
+    const { getSupplierId } = await import('../config/supplier.js');
+    const SUPPLIER_ID = getSupplierId(env);
     if (idFournisseurNum !== SUPPLIER_ID) {
       return errorResponse('Invalid supplier ID', 403);
     }
@@ -135,8 +136,8 @@ export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
             mappedBooking.accommodationId,
             mappedBooking.arrivalDate,
             mappedBooking.departureDate,
-            dossier.client?.nom || null,
-            dossier.client?.prenom || null,
+            mappedBooking.clientName?.split(' ').slice(1).join(' ') || null, // nom
+            mappedBooking.clientName?.split(' ')[0] || null, // prénom
             mappedBooking.clientEmail || null,
             mappedBooking.clientPhone || null,
             mappedBooking.numberOfPersons || 2,
@@ -148,7 +149,6 @@ export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
         }
       } else {
         // Insérer en DB
-        const { SUPPLIER_ID } = await import('../config/supplier.js');
         const { BookingStatus, PlateformeReservation } = await import('../types/api.js');
         
         await env.DB.prepare(`
@@ -164,8 +164,8 @@ export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
           mappedBooking.accommodationId,
           mappedBooking.arrivalDate,
           mappedBooking.departureDate,
-          dossier.client?.nom || null,
-          dossier.client?.prenom || null,
+          mappedBooking.clientName?.split(' ').slice(1).join(' ') || null, // nom
+          mappedBooking.clientName?.split(' ')[0] || null, // prénom
           mappedBooking.clientEmail || null,
           mappedBooking.clientPhone || null,
           mappedBooking.numberOfPersons || 2,

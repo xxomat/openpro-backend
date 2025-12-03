@@ -12,7 +12,13 @@ import { cronRouter } from './routes/cron.js';
 import { accommodationsRouter } from './routes/accommodations.js';
 import { icalRouter } from './routes/ical.js';
 import { corsHeaders, handleCors, jsonResponse } from './utils/cors.js';
-import { syncOpenProBookingsOnStartup, exportAccommodationDataOnStartup } from './services/openpro/startupSyncService.js';
+import { 
+  verifyAccommodationsOnStartup,
+  syncRateTypesOnStartup,
+  syncRateTypeLinksOnStartup,
+  syncOpenProBookingsOnStartup, 
+  exportAccommodationDataOnStartup 
+} from './services/openpro/startupSyncService.js';
 
 /**
  * Interface Env définissant toutes les variables d'environnement
@@ -28,6 +34,9 @@ export interface Env {
   
   // Configuration Frontend
   FRONTEND_URL: string;
+  
+  // Configuration Fournisseur
+  SUPPLIER_ID: string; // ID du fournisseur unique (format string, converti en number)
   
   // Configuration AI
   AI_PROVIDER: string;
@@ -110,11 +119,30 @@ export default {
     if (!startupSyncExecuted) {
       startupSyncExecuted = true;
       // Utiliser waitUntil pour exécuter de manière asynchrone sans bloquer la requête
+      // Ordre d'exécution selon le PRD :
+      // 1. Vérification des hébergements (prérequis pour les étapes suivantes)
+      // 2. Synchronisation des plans tarifaires (prérequis pour les liens)
+      // 3. Synchronisation des liens plans tarifaires/hébergements (nécessite hébergements et plans tarifaires)
+      // 4. Synchronisation des réservations OpenPro (peut être exécutée en parallèle)
+      // 5. Export des données d'hébergements vers OpenPro (en dernier, après que tout soit synchronisé)
       executionCtx.waitUntil(
-        Promise.all([
-          syncOpenProBookingsOnStartup(env),
-          exportAccommodationDataOnStartup(env)
-        ]).catch(error => {
+        (async () => {
+          // 1. Vérification des hébergements
+          await verifyAccommodationsOnStartup(env);
+          
+          // 2. Synchronisation des plans tarifaires
+          await syncRateTypesOnStartup(env);
+          
+          // 3. Synchronisation des liens plans tarifaires/hébergements
+          await syncRateTypeLinksOnStartup(env);
+          
+          // 4. Synchronisation des réservations OpenPro (peut être en parallèle)
+          // 5. Export des données d'hébergements vers OpenPro
+          await Promise.all([
+            syncOpenProBookingsOnStartup(env),
+            exportAccommodationDataOnStartup(env)
+          ]);
+        })().catch(error => {
           console.error('[StartupSync] Error during startup synchronization:', error);
         })
       );
@@ -153,7 +181,7 @@ export default {
       
       // Health check endpoint (en premier pour être sûr qu'il fonctionne)
       // IMPORTANT: Les handlers itty-router reçoivent (request, env, executionCtx) automatiquement
-      router.get('/health', (request: IRequest, env: Env, executionCtx: ExecutionContext) => {
+      router.get('/health', (_request: IRequest, _env: Env, _executionCtx: ExecutionContext) => {
         if (!isAdminRequest) {
           logger.info('Health check called');
         }
@@ -167,7 +195,7 @@ export default {
       });
       
       // Debug endpoint
-      router.get('/debug', (request: IRequest, env: Env, executionCtx: ExecutionContext) => {
+      router.get('/debug', (request: IRequest, env: Env, _executionCtx: ExecutionContext) => {
         if (!isAdminRequest) {
           logger.info('Debug endpoint called');
         }

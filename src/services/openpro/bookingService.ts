@@ -8,7 +8,8 @@
 import type { IBookingDisplay } from '../../types/api.js';
 import { PlateformeReservation } from '../../types/api.js';
 import { getOpenProClient } from '../openProClient.js';
-import type { Booking, DossierTransaction } from '../../../openpro-api-react/src/client/types.js';
+import type { DossierTransaction } from '../../../openpro-api-react/src/client/types.js';
+import { BookingStatus, PlateformeReservation } from '../../types/api.js';
 import type { Env } from '../../index.js';
 import { 
   updateSyncedStatusForLocalBookings
@@ -223,7 +224,9 @@ export async function loadBookingsForAccommodation(
         creationDate,
         reservationPlatform,
         isPendingSync: false,
-        isObsolete: false
+        isObsolete: false,
+        reservationPlatform: PlateformeReservation.Unknown,
+        bookingStatus: BookingStatus.Confirmed
       });
     }
   }

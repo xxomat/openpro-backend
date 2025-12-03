@@ -1,14 +1,32 @@
 /**
  * Configuration du fournisseur unique
  * 
- * Le système gère un seul fournisseur, stocké en dur comme constante.
- * Cette constante est utilisée dans tout le code pour référencer le fournisseur.
+ * Le système gère un seul fournisseur, configuré via la variable d'environnement SUPPLIER_ID.
+ * Cette valeur est utilisée dans tout le code pour référencer le fournisseur.
  */
 
+import type { Env } from '../index.js';
+
 /**
- * ID du fournisseur unique
+ * Récupère l'ID du fournisseur depuis les variables d'environnement
  * 
- * TODO: Remplacer par l'ID réel du fournisseur en production
+ * @param env - Variables d'environnement Workers
+ * @returns ID du fournisseur (number)
+ * @throws Error si SUPPLIER_ID n'est pas défini ou invalide
  */
-export const SUPPLIER_ID = 47186; // Valeur par défaut pour les tests (peut être modifiée)
+export function getSupplierId(env: Env): number {
+  const supplierId = env.SUPPLIER_ID;
+  
+  if (!supplierId) {
+    throw new Error('SUPPLIER_ID environment variable is not defined');
+  }
+  
+  const supplierIdNum = parseInt(supplierId, 10);
+  
+  if (isNaN(supplierIdNum)) {
+    throw new Error(`Invalid SUPPLIER_ID: "${supplierId}" is not a valid number`);
+  }
+  
+  return supplierIdNum;
+}
 

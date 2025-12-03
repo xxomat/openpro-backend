@@ -5,7 +5,8 @@
  * dans wrangler.toml (triggers.crons)
  */
 
-import type { IRequest, Router } from 'itty-router';
+import type { IRequest } from 'itty-router';
+import type { Router } from 'itty-router';
 import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { createLogger } from '../index.js';
@@ -326,7 +327,7 @@ async function validateDirectBookingsSync(env: Env): Promise<{
 /**
  * Enregistre les routes de cron
  */
-export function cronRouter(router: Router, env: Env, ctx: RequestContext) {
+export function cronRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
   
   // GET /cron/validate-direct-bookings

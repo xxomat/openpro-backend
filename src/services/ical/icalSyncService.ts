@@ -79,8 +79,9 @@ export async function syncIcalImport(
         // Marquer la réservation correspondante comme annulée si elle existe
         const existing = existingBookingsMap.get(event.uid);
         if (existing && existing.bookingStatus !== BookingStatus.Cancelled) {
-          const { SUPPLIER_ID } = await import('../../config/supplier.js');
+          const { getSupplierId } = await import('../../config/supplier.js');
           const { markBookingAsCancelled } = await import('../openpro/localBookingService.js');
+          const SUPPLIER_ID = getSupplierId(env);
           await markBookingAsCancelled(
             SUPPLIER_ID,
             existing.bookingId,
@@ -109,7 +110,8 @@ export async function syncIcalImport(
         }
       } else {
         // Créer une nouvelle réservation
-        const { SUPPLIER_ID } = await import('../../config/supplier.js');
+        const { getSupplierId } = await import('../../config/supplier.js');
+        const SUPPLIER_ID = getSupplierId(env);
         const reservationPlatform = platform === 'Booking.com' ? PlateformeReservation.BookingCom : PlateformeReservation.Unknown;
         
         await env.DB.prepare(`
@@ -136,8 +138,9 @@ export async function syncIcalImport(
     const eventUids = new Set(events.map(e => e.uid));
     for (const booking of existingBookings) {
       if (booking.reference && !eventUids.has(booking.reference) && booking.bookingStatus !== BookingStatus.Cancelled) {
-        const { SUPPLIER_ID } = await import('../../config/supplier.js');
+        const { getSupplierId } = await import('../../config/supplier.js');
         const { markBookingAsCancelled } = await import('../openpro/localBookingService.js');
+        const SUPPLIER_ID = getSupplierId(env);
         await markBookingAsCancelled(
           SUPPLIER_ID,
           booking.bookingId,

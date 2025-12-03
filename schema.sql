@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_accommodation_external_ids_hebergement
 -- Table des plans tarifaires
 CREATE TABLE IF NOT EXISTS rate_types (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  id_type_tarif INTEGER NOT NULL UNIQUE,
+  id_type_tarif INTEGER NULL UNIQUE,  -- ID OpenPro (nullable, peut être NULL avant création dans OpenPro)
   libelle TEXT, -- JSON pour multilingue
   description TEXT, -- JSON pour multilingue
   ordre INTEGER,
@@ -40,17 +40,18 @@ CREATE TABLE IF NOT EXISTS rate_types (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rate_types_id_type_tarif 
-  ON rate_types(id_type_tarif);
+  ON rate_types(id_type_tarif) WHERE id_type_tarif IS NOT NULL;
 
 -- Table des liaisons hébergement - plans tarifaires
 CREATE TABLE IF NOT EXISTS accommodation_rate_type_links (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   id_hebergement TEXT NOT NULL,
-  id_type_tarif INTEGER NOT NULL,
+  id_rate_type TEXT NOT NULL,  -- Référence rate_types(id) - UUID interne (permet de lier sans ID OpenPro)
+  id_type_tarif INTEGER,  -- Gardé pour compatibilité OpenPro (peut être NULL)
   date_creation TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(id_hebergement, id_type_tarif),
+  UNIQUE(id_hebergement, id_rate_type),
   FOREIGN KEY (id_hebergement) REFERENCES accommodations(id),
-  FOREIGN KEY (id_type_tarif) REFERENCES rate_types(id_type_tarif)
+  FOREIGN KEY (id_rate_type) REFERENCES rate_types(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_accommodation_rate_type_links_hebergement 
@@ -60,7 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_accommodation_rate_type_links_hebergement
 CREATE TABLE IF NOT EXISTS accommodation_data (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   id_hebergement TEXT NOT NULL,
-  id_type_tarif INTEGER NOT NULL,
+  id_rate_type TEXT NOT NULL,  -- Référence rate_types(id) - UUID interne (permet de lier sans ID OpenPro)
+  id_type_tarif INTEGER,  -- Gardé pour compatibilité OpenPro (peut être NULL)
   date TEXT NOT NULL, -- Format YYYY-MM-DD
   prix_nuitee REAL,
   arrivee_autorisee BOOLEAN,
@@ -69,9 +71,9 @@ CREATE TABLE IF NOT EXISTS accommodation_data (
   duree_maximale INTEGER,
   date_creation TEXT NOT NULL DEFAULT (datetime('now')),
   date_modification TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(id_hebergement, id_type_tarif, date),
+  UNIQUE(id_hebergement, id_rate_type, date),
   FOREIGN KEY (id_hebergement) REFERENCES accommodations(id),
-  FOREIGN KEY (id_type_tarif) REFERENCES rate_types(id_type_tarif)
+  FOREIGN KEY (id_rate_type) REFERENCES rate_types(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_accommodation_data_hebergement_date 

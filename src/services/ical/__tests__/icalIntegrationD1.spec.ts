@@ -18,7 +18,7 @@ import { parseIcal } from '../icalParser.js';
 import { createAccommodation } from '../../openpro/accommodationService.js';
 import { createLocalBooking } from '../../openpro/localBookingService.js';
 import { PlateformeReservation, BookingStatus } from '../../../types/api.js';
-import { SUPPLIER_ID } from '../../../config/supplier.js';
+import { getSupplierId } from '../../../config/supplier.js';
 import { createD1TestDatabase } from './d1TestHelper.js';
 
 const __dirname = new URL('.', import.meta.url).pathname;
@@ -54,6 +54,7 @@ describe('iCal Integration Test - Real D1 Database', () => {
       OPENPRO_BASE_URL: 'http://localhost:3000',
       FRONTEND_URL: 'http://localhost:4321',
       AI_PROVIDER: 'openai',
+      SUPPLIER_ID: '47186',
     };
 
     // Créer un hébergement de test

@@ -10,6 +10,7 @@ compatibility_date = "2024-01-01"
 OPENPRO_BASE_URL = "http://localhost:3000"
 FRONTEND_URL = "http://localhost:4321"
 AI_PROVIDER = "openai"
+SUPPLIER_ID = "47186"  # ID du fournisseur unique (valeur par défaut pour les tests)
 
 # Secrets (à définir via: wrangler secret put <NAME>)
 # OPENPRO_API_KEY - Clé API OpenPro

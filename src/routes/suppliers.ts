@@ -4,14 +4,14 @@
  * Adaptées pour Cloudflare Workers avec itty-router
  */
 
-import type { IRequest, Router } from 'itty-router';
+import type { IRequest } from 'itty-router';
+import type { Router } from 'itty-router';
 import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { loadAllAccommodations, loadAccommodation, findAccommodationByOpenProId } from '../services/openpro/accommodationService.js';
 import { getSupplierData } from '../services/openpro/supplierDataService.js';
 import { loadRatesForAccommodation } from '../services/openpro/rateService.js';
 import { loadStockForAccommodation } from '../services/openpro/stockService.js';
-import { loadRateTypes, buildRateTypesList } from '../services/openpro/rateTypeService.js';
 import { transformBulkToOpenProFormat, type BulkUpdateRequest } from '../services/openpro/bulkUpdateService.js';
 import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
@@ -19,15 +19,16 @@ import { createLocalBooking, deleteLocalBooking, loadAllBookings } from '../serv
 import { syncBookingToStub } from '../services/openpro/stubSyncService.js';
 import type { IApiTarif } from '../types/apiTypes.js';
 import type { TypeTarifModif } from '@openpro-api-react/client/types.js';
-import { SUPPLIER_ID } from '../config/supplier.js';
-import { saveRateType, deleteRateType, linkRateTypeToAccommodation, unlinkRateTypeFromAccommodation, loadAccommodationRateTypeLinks } from '../services/openpro/rateTypeDbService.js';
+import { getSupplierId } from '../config/supplier.js';
+import { saveRateType, updateRateTypeOpenProId, deleteRateType, linkRateTypeToAccommodation, unlinkRateTypeFromAccommodation } from '../services/openpro/rateTypeDbService.js';
 import { saveAccommodationStock, saveAccommodationData, exportAccommodationDataToOpenPro } from '../services/openpro/accommodationDataService.js';
 
 /**
  * Enregistre les routes des fournisseurs
  */
-export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
+export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
+  const SUPPLIER_ID = getSupplierId(env);
   
   // GET /api/suppliers/:idFournisseur/accommodations
   router.get('/api/suppliers/:idFournisseur/accommodations', async (request: IRequest) => {
@@ -385,26 +386,29 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
-      // Créer dans OpenPro d'abord (pour obtenir l'ID)
-      const openProClient = getOpenProClient(env);
-      const result = await openProClient.createRateType(SUPPLIER_ID, payload.typeTarifModif);
-      
-      // Extraire l'ID du plan tarifaire créé
-      const idTypeTarif = (result as any)?.idTypeTarif || (result as any)?.data?.idTypeTarif;
-      if (!idTypeTarif) {
-        logger.warn('Could not extract idTypeTarif from OpenPro response, skipping DB save');
-        return jsonResponse(result);
-      }
-      
-      // Sauvegarder en DB
-      await saveRateType({
-        idTypeTarif: Number(idTypeTarif),
+      // 1. Sauvegarder d'abord en DB (sans id_type_tarif)
+      const idInterne = await saveRateType({
+        // idTypeTarif non fourni = NULL (sera mis à jour après création dans OpenPro)
         libelle: payload.typeTarifModif.libelle ? JSON.stringify(payload.typeTarifModif.libelle) : undefined,
         description: payload.typeTarifModif.description ? JSON.stringify(payload.typeTarifModif.description) : undefined,
         ordre: payload.typeTarifModif.ordre
       }, env);
       
-      logger.info(`Saved rate type ${idTypeTarif} to DB`);
+      // 2. Créer dans OpenPro
+      const openProClient = getOpenProClient(env);
+      const result = await openProClient.createRateType(SUPPLIER_ID, payload.typeTarifModif);
+      
+      // 3. Extraire l'ID OpenPro retourné
+      const idTypeTarif = (result as any)?.idTypeTarif || (result as any)?.data?.idTypeTarif;
+      if (!idTypeTarif) {
+        logger.warn('Could not extract idTypeTarif from OpenPro response, rate type saved in DB without OpenPro ID');
+        return jsonResponse(result);
+      }
+      
+      // 4. Mettre à jour la DB avec l'ID OpenPro
+      await updateRateTypeOpenProId(idInterne, Number(idTypeTarif), env);
+      
+      logger.info(`Created rate type ${idTypeTarif} (internal ID: ${idInterne})`);
       return jsonResponse(result);
     } catch (error) {
       logger.error('Error creating rate type', error);

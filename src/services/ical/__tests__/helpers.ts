@@ -60,6 +60,7 @@ export function createTestEnv(db: D1Database): Env {
     OPENPRO_BASE_URL: 'http://localhost:3000',
     FRONTEND_URL: 'http://localhost:4321',
     AI_PROVIDER: 'openai',
+    SUPPLIER_ID: '47186',
   };
 }
 

@@ -4,7 +4,8 @@
  * Adaptées pour Cloudflare Workers avec itty-router
  */
 
-import type { IRequest, Router } from 'itty-router';
+import type { IRequest } from 'itty-router';
+import type { Router } from 'itty-router';
 import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { getSuggestionsBySupplier, updateSuggestionStatus } from '../services/ai/suggestionStorage.js';
@@ -65,7 +66,7 @@ function normalizeStock(stock: unknown): Record<string, number> {
 /**
  * Enregistre les routes des suggestions
  */
-export function suggestionsRouter(router: Router, env: Env, ctx: RequestContext) {
+export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
   
   // GET /ai/suggestions/:idFournisseur

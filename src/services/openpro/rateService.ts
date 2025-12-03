@@ -271,7 +271,7 @@ export async function loadRatesForAccommodation(
         if (!mapArriveeAutorisee[date]) {
           mapArriveeAutorisee[date] = {};
         }
-        mapArriveeAutorisee[date][idTypeTarif] = rateData.arrivee_autorisee === 1;
+        mapArriveeAutorisee[date][idTypeTarif] = rateData.arrivee_autorisee === true || rateData.arrivee_autorisee === 1;
       }
       
       // Type de tarif (libellé)

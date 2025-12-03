@@ -8,7 +8,7 @@
 import type { Env } from '../../index.js';
 import { getOpenProClient } from '../openProClient.js';
 import type { RequeteTarifModif, TarifModif } from '@openpro-api-react/client/types.js';
-import { loadAccommodationRateTypeLinks } from './rateTypeDbService.js';
+import { loadAccommodationRateTypeLinks, findRateTypeIdByOpenProId } from './rateTypeDbService.js';
 
 /**
  * Interface pour une ligne de données tarifaires en DB
@@ -16,7 +16,8 @@ import { loadAccommodationRateTypeLinks } from './rateTypeDbService.js';
 interface AccommodationDataRow {
   id: string;
   id_hebergement: string;
-  id_type_tarif: number;
+  id_rate_type: string;  // UUID interne (référence rate_types.id)
+  id_type_tarif: number | null;  // ID OpenPro (peut être NULL)
   date: string;
   prix_nuitee: number | null;
   arrivee_autorisee: boolean | null;
@@ -55,13 +56,19 @@ export async function saveAccommodationData(
   },
   env: Env
 ): Promise<void> {
+  // Trouver l'ID interne du plan tarifaire depuis son ID OpenPro
+  const idRateType = await findRateTypeIdByOpenProId(idTypeTarif, env);
+  if (!idRateType) {
+    throw new Error(`Rate type with OpenPro ID ${idTypeTarif} not found`);
+  }
+
   const now = new Date().toISOString();
 
-  // Vérifier si les données existent déjà
+  // Vérifier si les données existent déjà (utiliser id_rate_type)
   const existing = await env.DB.prepare(`
     SELECT id FROM accommodation_data
-    WHERE id_hebergement = ? AND id_type_tarif = ? AND date = ?
-  `).bind(idHebergement, idTypeTarif, date).first();
+    WHERE id_hebergement = ? AND id_rate_type = ? AND date = ?
+  `).bind(idHebergement, idRateType, date).first();
 
   if (existing) {
     // Mettre à jour
@@ -92,28 +99,29 @@ export async function saveAccommodationData(
     if (updates.length > 0) {
       updates.push('date_modification = ?');
       values.push(now);
-      values.push(idHebergement, idTypeTarif, date);
+      values.push(idHebergement, idRateType, date);
 
       await env.DB.prepare(`
         UPDATE accommodation_data
         SET ${updates.join(', ')}
-        WHERE id_hebergement = ? AND id_type_tarif = ? AND date = ?
+        WHERE id_hebergement = ? AND id_rate_type = ? AND date = ?
       `).bind(...values).run();
     }
   } else {
-    // Créer
+    // Créer (utiliser id_rate_type)
     const id = crypto.randomUUID();
     await env.DB.prepare(`
       INSERT INTO accommodation_data (
-        id, id_hebergement, id_type_tarif, date,
+        id, id_hebergement, id_rate_type, id_type_tarif, date,
         prix_nuitee, arrivee_autorisee, depart_autorise,
         duree_minimale, duree_maximale,
         date_creation, date_modification
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id,
       idHebergement,
-      idTypeTarif,
+      idRateType,
+      idTypeTarif,  // Garder pour compatibilité
       date,
       data.prixNuitee || null,
       data.arriveeAutorisee !== undefined ? (data.arriveeAutorisee ? 1 : 0) : null,
@@ -135,10 +143,13 @@ export async function loadAccommodationData(
   dateFin: string,
   env: Env
 ): Promise<Record<string, Record<number, AccommodationDataRow>>> {
+  // Joindre avec rate_types pour obtenir id_type_tarif
   const result = await env.DB.prepare(`
-    SELECT * FROM accommodation_data
-    WHERE id_hebergement = ? AND date >= ? AND date <= ?
-    ORDER BY date ASC, id_type_tarif ASC
+    SELECT ad.*, rt.id_type_tarif
+    FROM accommodation_data ad
+    INNER JOIN rate_types rt ON rt.id = ad.id_rate_type
+    WHERE ad.id_hebergement = ? AND ad.date >= ? AND ad.date <= ?
+    ORDER BY ad.date ASC, rt.id_type_tarif ASC
   `).bind(idHebergement, dateDebut, dateFin).all();
 
   if (!result.results || result.results.length === 0) {
@@ -146,7 +157,11 @@ export async function loadAccommodationData(
   }
 
   const data: Record<string, Record<number, AccommodationDataRow>> = {};
-  for (const row of result.results as AccommodationDataRow[]) {
+  for (const row of result.results as unknown as Array<AccommodationDataRow & { id_type_tarif: number | null }>) {
+    if (!row.id_type_tarif) {
+      // Ignorer les plans tarifaires sans ID OpenPro (ne peuvent pas être exportés)
+      continue;
+    }
     if (!data[row.date]) {
       data[row.date] = {};
     }
@@ -210,7 +225,7 @@ export async function loadAccommodationStock(
   }
 
   const stock: Record<string, number> = {};
-  for (const row of result.results as AccommodationStockRow[]) {
+  for (const row of result.results as unknown as AccommodationStockRow[]) {
     stock[row.date] = row.stock || 0;
   }
 
@@ -262,11 +277,17 @@ export async function exportAccommodationDataToOpenPro(
     for (const [date, rateData] of Object.entries(data)) {
       const rateDataForType = rateData[idTypeTarif];
       if (rateDataForType) {
+        // SQLite stocke les booleans comme 0/1, donc on doit gérer les deux cas
+        const arriveeAutorisee = rateDataForType.arrivee_autorisee === true || 
+          (typeof rateDataForType.arrivee_autorisee === 'number' && rateDataForType.arrivee_autorisee === 1);
+        const departAutorise = rateDataForType.depart_autorise === true || 
+          (typeof rateDataForType.depart_autorise === 'number' && rateDataForType.depart_autorise === 1);
+        
         datesForRateType.push({
           date,
           prixNuitee: rateDataForType.prix_nuitee || undefined,
-          arriveeAutorisee: rateDataForType.arrivee_autorisee === 1,
-          departAutorise: rateDataForType.depart_autorise === 1,
+          arriveeAutorisee: arriveeAutorisee || undefined,
+          departAutorise: departAutorise || undefined,
           dureeMinimale: rateDataForType.duree_minimale
         });
       }
@@ -340,20 +361,23 @@ export async function exportAccommodationDataToOpenPro(
         const modif: TarifModif = {
           debut: period.debut,
           fin: period.fin,
-          idTypeTarif: idTypeTarif
-        };
-
-        if (period.prixNuitee !== undefined) {
-          modif.tarifPax = {
-            tarifPaxOccupation: [
+          idTypeTarif: idTypeTarif,
+          ouvert: true, // Par défaut ouvert si on a des données
+          dureeMin: period.dureeMinimale ?? 1, // Par défaut 1 si non défini
+          dureeMax: 14, // Par défaut 14 jours
+          arriveeAutorisee: period.arriveeAutorisee ?? true, // Par défaut autorisé
+          departAutorise: period.departAutorise ?? true, // Par défaut autorisé
+          tarifPax: {
+            listeTarifPaxOccupation: period.prixNuitee !== undefined ? [
               {
-                nbPersonnes: 2,
+                nbPers: 2,
                 prix: period.prixNuitee
               }
-            ]
-          };
-        }
+            ] : []
+          }
+        };
 
+        // Mettre à jour les valeurs si définies
         if (period.arriveeAutorisee !== undefined) {
           modif.arriveeAutorisee = period.arriveeAutorisee;
         }

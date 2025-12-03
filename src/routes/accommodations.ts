@@ -4,7 +4,8 @@
  * Gère les CRUD des hébergements et leurs identifiants externes.
  */
 
-import type { IRequest, Router } from 'itty-router';
+import type { IRequest } from 'itty-router';
+import type { Router } from 'itty-router';
 import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
 import { createLogger } from '../index.js';
@@ -16,17 +17,17 @@ import {
   loadAccommodation,
   loadAllAccommodations,
   setAccommodationExternalId,
-  getAccommodationExternalId
 } from '../services/openpro/accommodationService.js';
+import { getStartupWarnings } from '../services/openpro/startupSyncService.js';
 
 /**
  * Enregistre les routes des hébergements
  */
-export function accommodationsRouter(router: Router, env: Env, ctx: RequestContext) {
+export function accommodationsRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
 
   // GET /api/accommodations - Liste tous les hébergements
-  router.get('/api/accommodations', async (request: IRequest) => {
+  router.get('/api/accommodations', async (_request: IRequest) => {
     try {
       const accommodations = await loadAllAccommodations(env);
       return jsonResponse({ accommodations });
@@ -74,6 +75,10 @@ export function accommodationsRouter(router: Router, env: Env, ctx: RequestConte
 
     if (!data.ids || !data.ids[PlateformeReservation.Directe]) {
       return errorResponse('L\'ID pour la plateforme "Directe" est obligatoire', 400);
+    }
+
+    if (!data.ids || !data.ids[PlateformeReservation.OpenPro]) {
+      return errorResponse('L\'ID pour la plateforme "OpenPro" est obligatoire', 400);
     }
 
     try {
@@ -184,6 +189,17 @@ export function accommodationsRouter(router: Router, env: Env, ctx: RequestConte
       return jsonResponse({ ids: accommodation.ids || {} });
     } catch (error) {
       logger.error('Error loading external IDs', error);
+      return errorResponse('Internal server error', 500);
+    }
+  });
+
+  // GET /api/startup-warnings - Récupérer les avertissements de synchronisation au démarrage
+  router.get('/api/startup-warnings', async (_request: IRequest) => {
+    try {
+      const warnings = getStartupWarnings();
+      return jsonResponse({ warnings, count: warnings.length });
+    } catch (error) {
+      logger.error('Error loading startup warnings', error);
       return errorResponse('Internal server error', 500);
     }
   });

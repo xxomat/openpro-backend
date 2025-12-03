@@ -32,6 +32,9 @@ Puis remplissez les valeurs :
 # OpenPro API
 OPENPRO_API_KEY=your_openpro_api_key_here
 
+# Supplier ID (ID du fournisseur unique)
+SUPPLIER_ID=47186
+
 # AI Providers (au moins l'un des deux)
 OPENAI_API_KEY=your_openai_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
