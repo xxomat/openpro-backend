@@ -426,7 +426,7 @@ Lors du démarrage du backend, plusieurs opérations sont exécutées dans un or
 5. Export des données d'hébergements vers OpenPro (en dernier, après que tout soit synchronisé)
 
 **1. Vérification des hébergements :**
-- Fonction : `verifyAccommodationsOnStartup()` (à implémenter)
+- Fonction : `verifyAccommodationsOnStartup()` ✅ Implémentée
 - Comportement :
   1. Charge tous les hébergements depuis la DB (table `accommodations`)
   2. Fetche tous les hébergements depuis OpenPro via `listAccommodations(SUPPLIER_ID)`
@@ -434,29 +434,32 @@ Lors du démarrage du backend, plusieurs opérations sont exécutées dans un or
      - Vérifie qu'il existe dans OpenPro
      - Si absent dans OpenPro : enregistre un avertissement pour l'admin
   4. **Note importante :** L'API OpenPro ne permet pas de créer un hébergement, donc on ne peut que vérifier et avertir
-  5. Les avertissements sont loggés et peuvent être exposés via un endpoint de statut pour l'interface admin
+  5. Les avertissements sont loggés et peuvent être exposés via l'endpoint `GET /api/startup-warnings`
 
 **2. Synchronisation des plans tarifaires :**
-- Fonction : `syncRateTypesOnStartup()` (à implémenter)
+- Fonction : `syncRateTypesOnStartup()` ✅ Implémentée
 - Comportement :
-  1. Charge tous les plans tarifaires depuis la DB (table `rate_types`)
+  1. Charge tous les plans tarifaires depuis la DB (table `rate_types`, y compris ceux sans ID OpenPro)
   2. Fetche tous les plans tarifaires depuis OpenPro via `listRateTypes(SUPPLIER_ID)`
-  3. Pour chaque plan tarifaire présent en DB mais absent d'OpenPro :
+  3. Pour chaque plan tarifaire présent en DB mais absent d'OpenPro (sans `id_type_tarif`) :
      - Crée automatiquement dans OpenPro via `openProClient.createRateType()`
-  4. Garantit que OpenPro est synchronisé avec la DB backend au démarrage
+     - Met à jour `id_type_tarif` dans la DB avec l'ID retourné par OpenPro
+  4. En cas d'échec de création : enregistre un avertissement
+  5. Garantit que OpenPro est synchronisé avec la DB backend au démarrage
 
 **3. Synchronisation des liens plans tarifaires/hébergements :**
-- Fonction : `syncRateTypeLinksOnStartup()` (à implémenter)
+- Fonction : `syncRateTypeLinksOnStartup()` ✅ Implémentée
 - Comportement :
-  1. Charge tous les liens depuis la DB (table `accommodation_rate_type_links`)
+  1. Charge tous les hébergements avec ID OpenPro depuis la DB
   2. Pour chaque hébergement avec un ID OpenPro :
+     - Charge les liens depuis la DB via `loadAccommodationRateTypeLinks()`
      - Fetche les liens depuis OpenPro via `listAccommodationRateTypeLinks()`
      - Compare avec les liens en DB
      - Pour chaque lien présent en DB mais absent dans OpenPro :
        - Crée automatiquement le lien dans OpenPro via `linkRateTypeToAccommodation()`
-     - Pour chaque lien présent dans OpenPro mais absent en DB :
-       - Optionnel : peut être supprimé d'OpenPro ou laissé tel quel (selon la stratégie)
-  3. Force tout écart dans OpenPro pour garantir la cohérence
+     - En cas d'échec : enregistre un avertissement
+  3. **Note :** Les liens présents dans OpenPro mais absents en DB ne sont pas supprimés automatiquement (laissés tel quel pour éviter la perte de données)
+  4. Force la création des liens manquants dans OpenPro pour garantir la cohérence DB → OpenPro
 
 **4. Synchronisation des réservations OpenPro :**
 - Fonction : `syncOpenProBookingsOnStartup()`
