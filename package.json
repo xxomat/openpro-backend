@@ -17,7 +17,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ical": "vitest run src/services/ical/__tests__",
-    "test:ical:integration": "node scripts/test-ical-integration.js"
+    "test:ical:integration": "node scripts/test-ical-integration.js",
+    "test:integration": "vitest run src/services/openpro/__tests__/startupSyncService.integration.spec.ts",
+    "test:integration:watch": "vitest watch src/services/openpro/__tests__/startupSyncService.integration.spec.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.45",
