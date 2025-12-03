@@ -10,6 +10,68 @@ import type { Env } from '../../index.js';
 import type { IBookingDisplay } from '../../types/api.js';
 
 /**
+ * Type pour le payload de création de dossier envoyé au stub-server
+ */
+export interface DossierCreationPayload {
+  idFournisseur: number;
+  reference: string;
+  dateCreation: string;
+  dateModification: string;
+  client: {
+    civilite: string;
+    nom: string;
+    prenom?: string;
+    email: string;
+    telephone: string;
+    remarques: string;
+    adresse: string;
+    codePostal: string;
+    ville: string;
+    pays: string;
+    dateNaissance: string;
+    nationalite: string;
+    profession: string;
+    societe: string;
+    siret: string;
+    tva: string;
+    langue: string;
+    newsletter: boolean;
+    cgvAcceptees: boolean;
+  };
+  hebergement: {
+    idHebergement: number;
+    nom: string;
+    dateArrivee: string;
+    dateDepart: string;
+    nbNuits: number;
+    nbPersonnes: number;
+    typeTarif: {
+      idTypeTarif: number;
+      libelle: string;
+      description: string;
+    };
+  };
+  paiement: {
+    montantTotal: number;
+    devise: string;
+    transactions: unknown[];
+  };
+  transaction: {
+    transactionResaLocale: {
+      idTransaction: string;
+      reference: string;
+      dateCreation: string;
+      dateModification: string;
+      montant: number;
+      devise: string;
+      statut: string;
+      pointDeVente: string;
+      utilisateur: string;
+    };
+  };
+}
+
+/**
  * Vérifie si on est en mode stub (localhost:3000)
  */
 export function isStubMode(env: Env): boolean {
@@ -23,7 +85,7 @@ export function isStubMode(env: Env): boolean {
 function convertBookingToDossier(
   booking: IBookingDisplay,
   idFournisseur: number
-): Record<string, unknown> {
+): DossierCreationPayload {
   // Calculer le nombre de nuits
   const arrivalDate = new Date(booking.arrivalDate);
   const departureDate = new Date(booking.departureDate);

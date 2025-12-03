@@ -17,6 +17,8 @@ import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
 import { createLocalBooking, deleteLocalBooking } from '../services/openpro/localBookingService.js';
 import { syncBookingToStub } from '../services/openpro/stubSyncService.js';
+import type { IApiTarif } from '../types/apiTypes.js';
+import type { TypeTarifModif } from '@openpro-api-react/client/types.js';
 
 /**
  * Enregistre les routes des fournisseurs
@@ -76,6 +78,98 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       logger.error('Error fetching rates', error);
       return errorResponse(
         'Failed to fetch rates',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
+  // GET /api/suppliers/:idFournisseur/accommodations/:idHebergement/rates/details
+  router.get('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rates/details', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const url = new URL(request.url);
+    const date = url.searchParams.get('date');
+    const rateTypeIdParam = url.searchParams.get('rateTypeId');
+    
+    if (isNaN(idFournisseur) || isNaN(idHebergement)) {
+      return errorResponse('Invalid parameters: idFournisseur and idHebergement must be numbers', 400);
+    }
+    
+    if (!date) {
+      return errorResponse('Missing required query parameter: date (format: YYYY-MM-DD)', 400);
+    }
+    
+    if (!rateTypeIdParam) {
+      return errorResponse('Missing required query parameter: rateTypeId', 400);
+    }
+    
+    const rateTypeId = parseInt(rateTypeIdParam, 10);
+    if (isNaN(rateTypeId)) {
+      return errorResponse('Invalid rateTypeId: must be a number', 400);
+    }
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      const rates = await openProClient.getRates(idFournisseur, idHebergement);
+      
+      // Transformer la réponse avec class-transformer
+      const dataToTransform = (rates && typeof rates === 'object' && 'data' in rates && rates.data) 
+        ? rates.data 
+        : rates;
+      
+      const { transformRatesResponse } = await import('../utils/transformers.js');
+      const apiResponse = transformRatesResponse(dataToTransform);
+      const tarifs = apiResponse.rates ?? apiResponse.periods ?? [];
+      
+      // Trouver le tarif correspondant à la date et au type de tarif
+      const dateObj = new Date(date + 'T00:00:00');
+      const matchingTarif = tarifs.find((tarif: IApiTarif) => {
+        const tarifRateTypeId = tarif.rateTypeId ?? tarif?.rateType?.rateTypeId;
+        if (Number(tarifRateTypeId) !== rateTypeId) {
+          return false;
+        }
+        
+        const deb = String(tarif.startDate ?? tarif.startDateAlt ?? '').trim();
+        const fe = String(
+          tarif.endDate ?? 
+          tarif.endDateAlt ?? 
+          (tarif as any)['fin'] ?? 
+          (tarif as any)['fin '] ?? 
+          ''
+        ).trim();
+        
+        if (!deb || !fe) {
+          return false;
+        }
+        
+        const startD = new Date(deb + 'T00:00:00');
+        const endD = new Date(fe + 'T23:59:59');
+        
+        return dateObj >= startD && dateObj <= endD;
+      });
+      
+      if (!matchingTarif) {
+        return errorResponse('No rate found for the specified date and rate type', 404);
+      }
+      
+      // Retourner le tarif sans les champs debut et fin
+      const { startDate, startDateAlt, endDate, endDateAlt, ...tarifWithoutDates } = matchingTarif;
+      const result = { ...tarifWithoutDates };
+      
+      // Nettoyer les propriétés 'fin' et 'fin ' si elles existent
+      if ('fin' in result) {
+        delete (result as any).fin;
+      }
+      if ('fin ' in result) {
+        delete (result as any)['fin '];
+      }
+      
+      return jsonResponse(result);
+    } catch (error) {
+      logger.error('Error fetching rate details', error);
+      return errorResponse(
+        'Failed to fetch rate details',
         500,
         error instanceof Error ? error.message : 'Unknown error'
       );
@@ -219,9 +313,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       return errorResponse('Invalid idFournisseur', 400);
     }
     
-    let payload: { typeTarifModif: unknown };
+    let payload: { typeTarifModif: TypeTarifModif };
     try {
-      payload = await request.json() as { typeTarifModif: unknown };
+      payload = await request.json() as { typeTarifModif: TypeTarifModif };
     } catch (error) {
       return errorResponse('Invalid JSON body', 400);
     }
@@ -232,7 +326,7 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     
     try {
       const openProClient = getOpenProClient(env);
-      const result = await openProClient.createRateType(idFournisseur, payload.typeTarifModif as any);
+      const result = await openProClient.createRateType(idFournisseur, payload.typeTarifModif);
       return jsonResponse(result);
     } catch (error) {
       logger.error('Error creating rate type', error);
@@ -257,9 +351,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       return errorResponse('Invalid idTypeTarif', 400);
     }
     
-    let payload: { typeTarifModif: unknown };
+    let payload: { typeTarifModif: TypeTarifModif };
     try {
-      payload = await request.json() as { typeTarifModif: unknown };
+      payload = await request.json() as { typeTarifModif: TypeTarifModif };
     } catch (error) {
       return errorResponse('Invalid JSON body', 400);
     }
@@ -270,7 +364,7 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     
     try {
       const openProClient = getOpenProClient(env);
-      await openProClient.updateRateType(idFournisseur, idTypeTarif, payload.typeTarifModif as any);
+      await openProClient.updateRateType(idFournisseur, idTypeTarif, payload.typeTarifModif);
       return jsonResponse({ success: true });
     } catch (error) {
       logger.error('Error updating rate type', error);

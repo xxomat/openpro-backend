@@ -5,7 +5,7 @@
  * reçues du frontend en périodes tarifaires au format attendu par l'API OpenPro.
  */
 
-import type { RequeteTarifModif, TarifModif } from '../../../openpro-api-react/src/client/types.js';
+import type { RequeteTarifModif, TarifModif, TarifPax, TarifPaxOccupation } from '@openpro-api-react/client/types.js';
 
 /**
  * Type pour une date modifiée dans la requête bulk
@@ -158,14 +158,13 @@ function transformPeriodToTarifModif(period: {
   }
   
   // Construire le tarifPax à partir du prix
-  const tarifPax: Record<string, unknown> = {};
+  const tarifPax: TarifPax = {};
   if (period.price !== undefined) {
-    tarifPax.listeTarifPaxOccupation = [
-      {
-        type: 'defaut',
-        prix: period.price
-      }
-    ];
+    const occupation: TarifPaxOccupation = {
+      type: 'defaut',
+      prix: period.price
+    };
+    tarifPax.listeTarifPaxOccupation = [occupation];
   } else {
     // Si pas de prix mais qu'on a un rateTypeId, utiliser une structure vide
     // Cela permet de modifier seulement dureeMin ou arriveeAutorisee sans modifier le prix
