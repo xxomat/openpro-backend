@@ -12,7 +12,8 @@ import type { IAccommodation, ISupplierData } from '../../types/api.js';
 import { formatDate } from '../../utils/dateUtils.js';
 import { getAccommodations } from './accommodationService.js';
 import { loadStockForAccommodation } from './stockService.js';
-import { loadRateTypes, buildRateTypesList } from './rateTypeService.js';
+import { buildRateTypesList } from './rateTypeService.js';
+import { loadRateTypes as loadRateTypesFromDb } from './rateTypeDbService.js';
 import { loadRatesForAccommodation } from './rateService.js';
 import { loadBookingsForAccommodation } from './bookingService.js';
 import { loadLocalBookingsForAccommodation } from './localBookingService.js';
@@ -60,8 +61,29 @@ export async function getSupplierData(
   const debut = formatDate(startDate);
   const fin = formatDate(endDate);
   
-  // Charger les types de tarifs disponibles
-  const discoveredRateTypes = await loadRateTypes(idFournisseur, accommodationsList, env, signal);
+  // Charger les types de tarifs disponibles depuis la DB (DB-first)
+  const dbRateTypes = await loadRateTypesFromDb(env);
+  
+  // Transformer IRateType[] en Map<number, DiscoveredRateType> pour compatibilité
+  const discoveredRateTypes = new Map<number, { rateTypeId: number; label: unknown; labelFr?: string; descriptionFr?: string; order?: number }>();
+  for (const rt of dbRateTypes) {
+    // Extraire le texte français depuis le label multilingue
+    let labelFr: string | undefined;
+    if (rt.label && Array.isArray(rt.label)) {
+      const frenchLabel = rt.label.find((item: any) => item.langue === 'fr' || item.langue === 'FR');
+      labelFr = frenchLabel?.texte;
+    } else if (rt.label && typeof rt.label === 'object' && rt.label !== null) {
+      labelFr = (rt.label as any).fr || (rt.label as any).FR;
+    }
+    
+    discoveredRateTypes.set(rt.rateTypeId, {
+      rateTypeId: rt.rateTypeId,
+      label: rt.label,
+      labelFr,
+      descriptionFr: rt.descriptionFr ?? labelFr,
+      order: rt.order
+    });
+  }
   
   // Charger les données pour chaque hébergement
   for (const acc of accommodationsList) {

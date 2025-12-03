@@ -417,18 +417,19 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
 
     // Extraire les noms des plans tarifaires depuis OpenPro
     const openProRateTypeNames = openProRateTypes.map((rt: any) => {
-      const idTypeTarif = rt.idTypeTarif ? `(ID: ${rt.idTypeTarif})` : '(sans ID)';
-      if (!rt.libelle) return `(sans nom) ${idTypeTarif}`;
+      const idTypeTarif = rt.cleTypeTarif?.idTypeTarif;
+      const idDisplay = idTypeTarif ? `(ID: ${idTypeTarif})` : '(sans ID)';
+      if (!rt.libelle) return `(sans nom) ${idDisplay}`;
       
       // Le libellé peut être un tableau Multilingue[] ou un objet
       if (Array.isArray(rt.libelle)) {
         const frLabel = rt.libelle.find((item: any) => item.langue === 'fr' || item.langue === 'FR');
-        return (frLabel?.texte || rt.libelle[0]?.texte || String(rt.libelle[0]) || '(sans nom)') + ` ${idTypeTarif}`;
+        return (frLabel?.texte || rt.libelle[0]?.texte || String(rt.libelle[0]) || '(sans nom)') + ` ${idDisplay}`;
       }
       if (typeof rt.libelle === 'object' && rt.libelle !== null) {
-        return (rt.libelle.fr || rt.libelle.FR || Object.values(rt.libelle)[0] || '(sans nom)') + ` ${idTypeTarif}`;
+        return (rt.libelle.fr || rt.libelle.FR || Object.values(rt.libelle)[0] || '(sans nom)') + ` ${idDisplay}`;
       }
-      return String(rt.libelle) + ` ${idTypeTarif}`;
+      return String(rt.libelle) + ` ${idDisplay}`;
     });
 
     console.log(`[StartupSync] Found ${openProRateTypes.length} rate types in OpenPro: ${openProRateTypeNames.join(', ')}`);
@@ -436,7 +437,7 @@ export async function syncRateTypesOnStartup(env: Env): Promise<void> {
     // Créer un Set des IDs OpenPro pour recherche rapide
     const openProRateTypeIds = new Set<number>();
     for (const rt of openProRateTypes) {
-      const idTypeTarif = (rt as any).idTypeTarif;
+      const idTypeTarif = (rt as any).cleTypeTarif?.idTypeTarif;
       if (idTypeTarif) {
         openProRateTypeIds.add(Number(idTypeTarif));
       }
