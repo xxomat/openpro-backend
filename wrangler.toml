@@ -31,5 +31,5 @@ local_protocol = "http"
 
 # Configuration des triggers cron (toutes les 15 minutes)
 [triggers]
-crons = ["*/2 * * * *"]
+crons = ["*/15 * * * *"]
 

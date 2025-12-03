@@ -4,16 +4,18 @@
  * Ce fichier contient les fonctions pour charger les tarifs, promotions,
  * types de tarifs et durées minimales pour un hébergement, ainsi que le
  * traitement individuel de chaque tarif.
+ * 
+ * NOTE: Les tarifs sont maintenant chargés depuis la DB uniquement (source de vérité).
  */
 
-import { getOpenProClient } from '../openProClient.js';
 import type { Env } from '../../index.js';
-import type { IApiTarif, IRatesResponse } from '../../types/apiTypes.js';
 import type { DiscoveredRateType } from './rateTypeService.js';
 import { formatDate } from '../../utils/dateUtils.js';
-import { extractPriceFromTarif, extractRateLabel } from './utils/rateUtils.js';
 import { updateDiscoveredRateTypes } from './rateTypeService.js';
-import { transformRatesResponse } from '../../utils/transformers.js';
+import { loadAccommodationData } from './accommodationDataService.js';
+import { findAccommodationByOpenProId, findAccommodationByPlatformId } from './accommodationService.js';
+import { loadRateTypesForAccommodation } from './rateTypeDbService.js';
+import { PlateformeReservation } from '../../types/api.js';
 
 /**
  * Traite un tarif individuel et met à jour les maps de tarifs, promotions, types et durées minimales
@@ -172,11 +174,11 @@ function processTarif(
 /**
  * Charge les tarifs, promotions, types de tarifs et durées minimales pour un hébergement
  * 
- * Cette fonction récupère tous les tarifs d'un hébergement sur une plage de dates,
- * traite chaque tarif individuellement, et retourne les maps organisées par date.
+ * Cette fonction charge tous les tarifs d'un hébergement depuis la DB (source de vérité)
+ * et retourne les maps organisées par date.
  * 
- * @param idFournisseur - Identifiant du fournisseur
- * @param idHebergement - Identifiant de l'hébergement
+ * @param idFournisseur - Identifiant du fournisseur (non utilisé, conservé pour compatibilité)
+ * @param idHebergement - Identifiant de l'hébergement (peut être number pour compatibilité ou string pour nouvelle structure)
  * @param debut - Date de début au format YYYY-MM-DD
  * @param fin - Date de fin au format YYYY-MM-DD
  * @param discoveredRateTypes - Map des types de tarifs découverts (sera modifiée)
@@ -188,7 +190,7 @@ function processTarif(
  */
 export async function loadRatesForAccommodation(
   idFournisseur: number,
-  idHebergement: number,
+  idHebergement: number | string,
   debut: string,
   fin: string,
   discoveredRateTypes: Map<number, DiscoveredRateType>,
@@ -201,10 +203,40 @@ export async function loadRatesForAccommodation(
   dureeMin: Record<string, Record<number, number | null>>;
   arriveeAutorisee: Record<string, Record<number, boolean>>;
 }> {
-  const openProClient = getOpenProClient(env);
-  // Ne pas passer de paramètres de date à getRates selon la documentation API
-  const rates = await openProClient.getRates(idFournisseur, idHebergement);
   if (signal?.aborted) throw new Error('Cancelled');
+  
+  // Si idHebergement est un number, chercher l'hébergement correspondant dans la DB
+  let accommodationId: string;
+  if (typeof idHebergement === 'number') {
+    const accommodation = await findAccommodationByPlatformId(PlateformeReservation.OpenPro, String(idHebergement), env);
+    if (!accommodation) {
+      // Si l'hébergement n'existe pas dans la DB, retourner des maps vides
+      console.warn(`[RateService] Accommodation with OpenPro ID ${idHebergement} not found in DB`);
+      return {
+        rates: {},
+        promo: {},
+        rateTypes: {},
+        dureeMin: {},
+        arriveeAutorisee: {}
+      };
+    }
+    accommodationId = accommodation.id;
+  } else {
+    accommodationId = idHebergement;
+  }
+  
+  // Charger les données tarifaires depuis la DB
+  const data = await loadAccommodationData(accommodationId, debut, fin, env);
+  
+  // Charger les plans tarifaires liés pour obtenir les libellés
+  const rateTypes = await loadRateTypesForAccommodation(accommodationId, env);
+  const rateTypeLabels = new Map<number, string>();
+  for (const rt of rateTypes) {
+    if (rt.rateTypeId && rt.label) {
+      const label = typeof rt.label === 'string' ? rt.label : (rt.label as any).fr || (rt.label as any).FR || String(rt.label);
+      rateTypeLabels.set(rt.rateTypeId, label);
+    }
+  }
   
   const mapRates: Record<string, Record<number, number>> = {};
   const mapPromo: Record<string, boolean> = {};
@@ -212,23 +244,64 @@ export async function loadRatesForAccommodation(
   const mapDureeMin: Record<string, Record<number, number | null>> = {};
   const mapArriveeAutorisee: Record<string, Record<number, boolean>> = {};
   
-  // L'API OpenPro retourne { ok: 1, data: { tarifs: [...] } }
-  // Il faut transformer data au lieu de la réponse complète
-  const dataToTransform = (rates && typeof rates === 'object' && 'data' in rates && rates.data) 
-    ? rates.data 
-    : rates;
-  
-  // Transformer la réponse avec class-transformer
-  const apiResponse = transformRatesResponse(dataToTransform);
-  const tarifs = apiResponse.rates ?? apiResponse.periods ?? [];
-  
-  for (const tarif of tarifs) {
-    processTarif(tarif, debut, fin, mapRates, mapPromo, mapRateTypes, mapDureeMin, mapArriveeAutorisee, discoveredRateTypes);
+  // Transformer les données de la DB en format compatible
+  for (const [date, rateDataByType] of Object.entries(data)) {
+    for (const [idTypeTarifStr, rateData] of Object.entries(rateDataByType)) {
+      const idTypeTarif = parseInt(idTypeTarifStr, 10);
+      if (isNaN(idTypeTarif)) continue;
+      
+      // Prix
+      if (rateData.prix_nuitee != null) {
+        if (!mapRates[date]) {
+          mapRates[date] = {};
+        }
+        mapRates[date][idTypeTarif] = rateData.prix_nuitee;
+      }
+      
+      // Durée minimale
+      if (rateData.duree_minimale != null) {
+        if (!mapDureeMin[date]) {
+          mapDureeMin[date] = {};
+        }
+        mapDureeMin[date][idTypeTarif] = rateData.duree_minimale;
+      }
+      
+      // Arrivée autorisée
+      if (rateData.arrivee_autorisee !== null) {
+        if (!mapArriveeAutorisee[date]) {
+          mapArriveeAutorisee[date] = {};
+        }
+        mapArriveeAutorisee[date][idTypeTarif] = rateData.arrivee_autorisee === 1;
+      }
+      
+      // Type de tarif (libellé)
+      const label = rateTypeLabels.get(idTypeTarif);
+      if (label) {
+        if (!mapRateTypes[date]) {
+          mapRateTypes[date] = [];
+        }
+        if (!mapRateTypes[date].includes(label)) {
+          mapRateTypes[date].push(label);
+          mapRateTypes[date] = mapRateTypes[date].slice(0, 2); // Garder max 2 types par date
+        }
+      }
+      
+      // Mettre à jour discoveredRateTypes
+      if (label) {
+        const discovered: DiscoveredRateType = {
+          rateTypeId: idTypeTarif,
+          label: label,
+          labelFr: label,
+          order: undefined
+        };
+        discoveredRateTypes.set(idTypeTarif, discovered);
+      }
+    }
   }
   
   return {
     rates: mapRates,
-    promo: mapPromo,
+    promo: mapPromo, // Les promotions ne sont pas gérées dans la DB pour l'instant
     rateTypes: mapRateTypes,
     dureeMin: mapDureeMin,
     arriveeAutorisee: mapArriveeAutorisee

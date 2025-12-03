@@ -9,7 +9,7 @@
  */
 
 import type { IBookingDisplay } from '../../types/api.js';
-import { PlateformeReservation } from '../../types/api.js';
+import { PlateformeReservation, BookingStatus } from '../../types/api.js';
 import type { Env } from '../../index.js';
 
 /**
@@ -18,7 +18,7 @@ import type { Env } from '../../index.js';
 interface LocalBookingRow {
   id: string;
   id_fournisseur: number;
-  id_hebergement: number;
+  id_hebergement: number; // Sera migré vers TEXT plus tard
   date_arrivee: string;
   date_depart: string;
   client_nom?: string;
@@ -28,6 +28,8 @@ interface LocalBookingRow {
   nb_personnes?: number;
   montant_total?: number;
   reference?: string;
+  reservation_platform: string;
+  booking_status: string;
   date_creation: string;
   date_modification: string;
   synced_at?: string | null;
@@ -196,8 +198,10 @@ export async function createLocalBooking(
       nb_personnes,
       montant_total,
       reference,
+      reservation_platform,
+      booking_status,
       synced_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
   `).bind(
     data.supplierId,
     data.accommodationId,
@@ -209,7 +213,9 @@ export async function createLocalBooking(
     data.clientPhone || null,
     numberOfPersons,
     data.totalAmount || null,
-    data.reference || null
+    data.reference || null,
+    PlateformeReservation.Directe,
+    BookingStatus.Quote
   ).run();
 
   // Récupérer la réservation créée en utilisant les critères uniques
@@ -261,9 +267,31 @@ function convertRowToBookingDisplay(row: LocalBookingRow): IBookingDisplay {
     bookingId = 0;
   }
 
+  // Déterminer la plateforme de réservation
+  let reservationPlatform: PlateformeReservation;
+  try {
+    reservationPlatform = row.reservation_platform as PlateformeReservation;
+    if (!Object.values(PlateformeReservation).includes(reservationPlatform)) {
+      reservationPlatform = PlateformeReservation.Unknown;
+    }
+  } catch {
+    reservationPlatform = PlateformeReservation.Directe;
+  }
+
+  // Déterminer l'état de la réservation
+  let bookingStatus: BookingStatus;
+  try {
+    bookingStatus = row.booking_status as BookingStatus;
+    if (!Object.values(BookingStatus).includes(bookingStatus)) {
+      bookingStatus = BookingStatus.Quote;
+    }
+  } catch {
+      bookingStatus = BookingStatus.Quote;
+  }
+
   return {
     bookingId, // ID interne de la DB converti en nombre pour identifier les réservations locales
-    accommodationId: row.id_hebergement,
+    accommodationId: row.id_hebergement, // number pour compatibilité, sera string plus tard
     arrivalDate: row.date_arrivee,
     departureDate: row.date_depart,
     reference: row.reference,
@@ -273,7 +301,8 @@ function convertRowToBookingDisplay(row: LocalBookingRow): IBookingDisplay {
     numberOfPersons: row.nb_personnes,
     totalAmount: row.montant_total,
     creationDate: row.date_creation,
-    reservationPlatform: PlateformeReservation.Directe,
+    reservationPlatform,
+    bookingStatus,
     isPendingSync: row.synced_at === null || row.synced_at === undefined,
     isObsolete: false // Les réservations dans la DB ne sont jamais obsolètes
   };
@@ -412,5 +441,90 @@ export async function deleteLocalBooking(
   `).bind(booking.id).run();
 
   return { success: true, deletedBooking: booking };
+}
+
+/**
+ * Met à jour l'état d'une réservation
+ * 
+ * @param idFournisseur - Identifiant du fournisseur
+ * @param bookingId - ID de la réservation
+ * @param bookingStatus - Nouvel état de la réservation
+ * @param env - Variables d'environnement Workers
+ * @returns True si la mise à jour a réussi
+ */
+export async function updateBookingStatus(
+  idFournisseur: number,
+  bookingId: number,
+  bookingStatus: BookingStatus,
+  env: Env,
+  accommodationId?: number,
+  arrivalDate?: string,
+  departureDate?: string
+): Promise<boolean> {
+  let booking: LocalBookingRow | null = null;
+
+  // Si on a les critères complets, utiliser la recherche par critères
+  if (accommodationId !== undefined && arrivalDate && departureDate) {
+    booking = await findLocalBookingByCriteria(idFournisseur, accommodationId, arrivalDate, departureDate, env);
+  }
+  
+  // Sinon, essayer par ID converti
+  if (!booking) {
+    booking = await findLocalBookingByIdDossier(idFournisseur, bookingId, env);
+  }
+
+  if (!booking) {
+    return false;
+  }
+
+  // Mettre à jour l'état
+  await env.DB.prepare(`
+    UPDATE local_bookings
+    SET booking_status = ?, date_modification = datetime('now')
+    WHERE id = ?
+  `).bind(bookingStatus, booking.id).run();
+
+  return true;
+}
+
+/**
+ * Marque une réservation comme annulée
+ * 
+ * @param idFournisseur - Identifiant du fournisseur
+ * @param bookingId - ID de la réservation
+ * @param env - Variables d'environnement Workers
+ * @param accommodationId - Identifiant de l'hébergement (optionnel)
+ * @param arrivalDate - Date d'arrivée (optionnel)
+ * @param departureDate - Date de départ (optionnel)
+ * @returns True si la mise à jour a réussi
+ */
+export async function markBookingAsCancelled(
+  idFournisseur: number,
+  bookingId: number,
+  env: Env,
+  accommodationId?: number,
+  arrivalDate?: string,
+  departureDate?: string
+): Promise<boolean> {
+  return updateBookingStatus(idFournisseur, bookingId, BookingStatus.Cancelled, env, accommodationId, arrivalDate, departureDate);
+}
+
+/**
+ * Charge toutes les réservations (toutes plateformes)
+ * 
+ * @param env - Variables d'environnement Workers
+ * @returns Tableau de toutes les réservations
+ */
+export async function loadAllBookings(env: Env): Promise<IBookingDisplay[]> {
+  const result = await env.DB.prepare(`
+    SELECT * FROM local_bookings
+    ORDER BY date_arrivee ASC
+  `).all();
+
+  if (!result.results || result.results.length === 0) {
+    return [];
+  }
+
+  return (result.results as LocalBookingRow[]).map(row => convertRowToBookingDisplay(row));
 }
 

@@ -9,7 +9,10 @@ import { suppliersRouter } from './routes/suppliers.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { suggestionsRouter } from './routes/suggestions.js';
 import { cronRouter } from './routes/cron.js';
+import { accommodationsRouter } from './routes/accommodations.js';
+import { icalRouter } from './routes/ical.js';
 import { corsHeaders, handleCors, jsonResponse } from './utils/cors.js';
+import { syncOpenProBookingsOnStartup, exportAccommodationDataOnStartup } from './services/openpro/startupSyncService.js';
 
 /**
  * Interface Env définissant toutes les variables d'environnement
@@ -95,11 +98,28 @@ function handleError(error: unknown, ctx: RequestContext): Response {
   );
 }
 
+// Flag pour s'assurer que la synchronisation au démarrage n'est exécutée qu'une fois
+let startupSyncExecuted = false;
+
 /**
  * Worker principal
  */
 export default {
   async fetch(request: Request, env: Env, executionCtx: ExecutionContext): Promise<Response> {
+    // Exécuter la synchronisation au démarrage (une seule fois)
+    if (!startupSyncExecuted) {
+      startupSyncExecuted = true;
+      // Utiliser waitUntil pour exécuter de manière asynchrone sans bloquer la requête
+      executionCtx.waitUntil(
+        Promise.all([
+          syncOpenProBookingsOnStartup(env),
+          exportAccommodationDataOnStartup(env)
+        ]).catch(error => {
+          console.error('[StartupSync] Error during startup synchronization:', error);
+        })
+      );
+    }
+
     // Créer le contexte de requête
     const ctx = createRequestContext();
     const logger = createLogger(ctx);
@@ -175,6 +195,8 @@ export default {
       webhooksRouter(router, env, ctx);
       suggestionsRouter(router, env, ctx);
       cronRouter(router, env, ctx);
+      accommodationsRouter(router, env, ctx);
+      icalRouter(router, env, ctx);
       
       // Route par défaut (404) - doit être en dernier
       router.all('*', (request: IRequest) => {

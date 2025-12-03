@@ -358,5 +358,72 @@ export function cronRouter(router: Router, env: Env, ctx: RequestContext) {
       );
     }
   });
+
+  // GET /cron/sync-ical-imports
+  // Cette route est appelée automatiquement par Cloudflare Cron toutes les 15 minutes
+  router.get('/cron/sync-ical-imports', async (request: IRequest) => {
+    // Vérifier que c'est bien un appel cron (optionnel, pour sécurité)
+    const cronHeader = request.headers.get('X-Cron');
+    if (cronHeader !== 'true' && !request.url.includes('/cron/')) {
+      logger.warn('Cron endpoint called without proper authorization');
+      return errorResponse('Unauthorized', 401);
+    }
+    
+    try {
+      logger.info('Starting cron job: sync-ical-imports');
+      
+      const { loadAllAccommodations } = await import('../services/openpro/accommodationService.js');
+      const { loadAllIcalSyncConfigs, syncIcalImport } = await import('../services/ical/icalSyncService.js');
+      
+      // Charger tous les hébergements
+      const accommodations = await loadAllAccommodations(env);
+      
+      let totalSynced = 0;
+      let totalErrors = 0;
+      
+      // Pour chaque hébergement, synchroniser les configurations iCal
+      for (const accommodation of accommodations) {
+        try {
+          const configs = await loadAllIcalSyncConfigs(accommodation.id, env);
+          
+          for (const config of configs) {
+            if (config.importUrl) {
+              try {
+                await syncIcalImport(accommodation.id, config.platform, env);
+                totalSynced++;
+                logger.info(`Synced iCal for accommodation ${accommodation.id}, platform ${config.platform}`);
+              } catch (error) {
+                totalErrors++;
+                logger.error(`Error syncing iCal for accommodation ${accommodation.id}, platform ${config.platform}:`, error);
+                // Continuer avec les autres configurations même si une échoue
+              }
+            }
+          }
+        } catch (error) {
+          totalErrors++;
+          logger.error(`Error loading iCal configs for accommodation ${accommodation.id}:`, error);
+          // Continuer avec les autres hébergements même si un échoue
+        }
+      }
+      
+      logger.info('Cron job completed', { totalSynced, totalErrors });
+      
+      return jsonResponse({
+        success: true,
+        timestamp: new Date().toISOString(),
+        stats: {
+          totalSynced,
+          totalErrors
+        }
+      });
+    } catch (error) {
+      logger.error('Error in cron job sync-ical-imports', error);
+      return errorResponse(
+        'Failed to sync iCal imports',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
 }
 

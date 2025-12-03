@@ -79,7 +79,118 @@ async function loadRecentBookings(
 export function webhooksRouter(router: Router, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
   
-  // POST /api/webhooks/openpro/booking
+  // GET /api/webhooks/openpro/booking?idFournisseur=X&idDossier=Y
+  router.get('/api/webhooks/openpro/booking', async (request: IRequest) => {
+    const url = new URL(request.url);
+    const idFournisseur = url.searchParams.get('idFournisseur');
+    const idDossier = url.searchParams.get('idDossier');
+    
+    if (!idFournisseur || !idDossier) {
+      return errorResponse('Missing idFournisseur or idDossier', 400);
+    }
+    
+    const idFournisseurNum = parseInt(idFournisseur, 10);
+    const idDossierNum = parseInt(idDossier, 10);
+    
+    if (isNaN(idFournisseurNum) || isNaN(idDossierNum)) {
+      return errorResponse('Invalid idFournisseur or idDossier', 400);
+    }
+    
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    const { SUPPLIER_ID } = await import('../config/supplier.js');
+    if (idFournisseurNum !== SUPPLIER_ID) {
+      return errorResponse('Invalid supplier ID', 403);
+    }
+    
+    logger.info(`Webhook GET reçu: réservation ${idDossierNum} pour fournisseur ${idFournisseurNum}`);
+    
+    try {
+      const openProClient = getOpenProClient(env);
+      
+      // Récupérer le dossier depuis OpenPro
+      const dossier = await openProClient.getBooking(idFournisseurNum, idDossierNum);
+      
+      // Mapper vers le format DB
+      const { mapOpenProDossierToBooking } = await import('../services/openpro/openProBookingService.js');
+      const mappedBooking = await mapOpenProDossierToBooking(dossier, env);
+      
+      // Vérifier si la réservation existe déjà en DB
+      const existing = await env.DB.prepare(`
+        SELECT id, booking_status FROM local_bookings
+        WHERE reference = ? AND reservation_platform = 'OpenPro'
+        LIMIT 1
+      `).bind(idDossier).first() as { id: string; booking_status: string } | null;
+      
+      if (existing) {
+        // Mettre à jour si nécessaire (sauf si déjà annulée)
+        if (existing.booking_status !== 'Cancelled') {
+          await env.DB.prepare(`
+            UPDATE local_bookings
+            SET id_hebergement = ?, date_arrivee = ?, date_depart = ?,
+                client_nom = ?, client_prenom = ?, client_email = ?, client_telephone = ?,
+                nb_personnes = ?, montant_total = ?,
+                date_modification = datetime('now')
+            WHERE id = ?
+          `).bind(
+            mappedBooking.accommodationId,
+            mappedBooking.arrivalDate,
+            mappedBooking.departureDate,
+            dossier.client?.nom || null,
+            dossier.client?.prenom || null,
+            mappedBooking.clientEmail || null,
+            mappedBooking.clientPhone || null,
+            mappedBooking.numberOfPersons || 2,
+            mappedBooking.totalAmount || null,
+            existing.id
+          ).run();
+          
+          logger.info(`Réservation ${idDossierNum} mise à jour en DB`);
+        }
+      } else {
+        // Insérer en DB
+        const { SUPPLIER_ID } = await import('../config/supplier.js');
+        const { BookingStatus, PlateformeReservation } = await import('../types/api.js');
+        
+        await env.DB.prepare(`
+          INSERT INTO local_bookings (
+            id_fournisseur, id_hebergement, date_arrivee, date_depart,
+            client_nom, client_prenom, client_email, client_telephone,
+            nb_personnes, montant_total, reference,
+            reservation_platform, booking_status,
+            date_creation, date_modification
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        `).bind(
+          SUPPLIER_ID,
+          mappedBooking.accommodationId,
+          mappedBooking.arrivalDate,
+          mappedBooking.departureDate,
+          dossier.client?.nom || null,
+          dossier.client?.prenom || null,
+          mappedBooking.clientEmail || null,
+          mappedBooking.clientPhone || null,
+          mappedBooking.numberOfPersons || 2,
+          mappedBooking.totalAmount || null,
+          idDossier,
+          PlateformeReservation.OpenPro,
+          BookingStatus.Confirmed
+        ).run();
+        
+        logger.info(`Réservation ${idDossierNum} insérée en DB`);
+      }
+      
+      return jsonResponse({ received: true, message: 'Booking processed' });
+      
+    } catch (error) {
+      logger.error('Erreur traitement webhook GET', error);
+      return errorResponse(
+        'Internal server error',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+  
+  // POST /api/webhooks/openpro/booking (ancien format, conservé pour compatibilité)
   router.post('/api/webhooks/openpro/booking', async (request: IRequest) => {
     let booking: {
       evenement?: string;

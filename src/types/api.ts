@@ -19,7 +19,30 @@ export enum PlateformeReservation {
   Unknown = 'Unknown'
 }
 
+/**
+ * Enum pour les états de réservation
+ */
+export enum BookingStatus {
+  Quote = 'Quote',           // Intention de réservation, pas d'acompte payé
+  Confirmed = 'Confirmed',   // Acompte de 30% payé
+  Paid = 'Paid',             // Entièrement payée
+  Cancelled = 'Cancelled',   // Annulée
+  Past = 'Past'              // Jour de départ passé
+}
+
+/**
+ * Interface pour un hébergement
+ */
 export interface IAccommodation {
+  id: string;                    // ID interne dans la DB
+  nom: string;                   // Nom de l'hébergement
+  ids: Partial<Record<PlateformeReservation, string>>; // Map plateforme -> ID externe (OpenPro, Booking.com, etc.)
+}
+
+/**
+ * Interface pour un hébergement (format legacy pour compatibilité)
+ */
+export interface IAccommodationLegacy {
   accommodationId: number;
   accommodationName: string;
 }
@@ -33,10 +56,10 @@ export interface IRateType {
 
 export interface IBookingDisplay {
   bookingId: number;
-  accommodationId: number;
+  accommodationId: number | string; // number pour compatibilité, string pour nouvelle structure
   arrivalDate: string; // YYYY-MM-DD
   departureDate: string;   // YYYY-MM-DD
-  reference?: string;
+  reference?: string; // Identifiant externe (idDossier OpenPro, UID iCal, etc.)
   clientName?: string;   // Nom du client (nom + prénom)
   clientTitle?: string; // Civilité du client (M, Mme, etc.)
   clientEmail?: string; // Email du client
@@ -62,6 +85,7 @@ export interface IBookingDisplay {
   currency?: string; // Devise du paiement (EUR, etc.)
   creationDate?: string; // Date de création du dossier
   reservationPlatform: PlateformeReservation; // Plateforme d'origine de la réservation (Unknown si non renseignée)
+  bookingStatus: BookingStatus; // État de la réservation (Quote, Confirmed, Paid, Cancelled, Past)
   isPendingSync?: boolean; // true si réservation Direct locale en attente de synchronisation avec OpenPro
   isObsolete?: boolean; // true si réservation Direct supprimée localement mais toujours présente dans OpenPro
 }
@@ -85,4 +109,24 @@ export interface IRatesData {
   promo: Record<string, boolean>;
   rateTypes: Record<string, string[]>;
   minDuration: Record<string, Record<number, number | null>>;
+}
+
+/**
+ * Interface pour la configuration iCal
+ */
+export interface IIcalSyncConfig {
+  id: string;
+  idHebergement: string;
+  platform: string;
+  importUrl?: string;
+  exportUrl?: string;
+  dateCreation: string;
+  dateModification: string;
+}
+
+/**
+ * Interface pour la réponse API de gestion iCal
+ */
+export interface IIcalSyncConfigResponse {
+  configs: IIcalSyncConfig[];
 }

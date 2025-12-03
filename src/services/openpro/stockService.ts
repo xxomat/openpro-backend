@@ -3,19 +3,22 @@
  * 
  * Ce fichier contient les fonctions pour charger le stock disponible
  * pour un hébergement sur une plage de dates donnée.
+ * 
+ * NOTE: Le stock est maintenant chargé depuis la DB uniquement (source de vérité).
  */
 
-import { getOpenProClient } from '../openProClient.js';
 import type { Env } from '../../index.js';
+import { loadAccommodationStock } from './accommodationDataService.js';
+import { findAccommodationByPlatformId } from './accommodationService.js';
+import { PlateformeReservation } from '../../types/api.js';
 
 /**
  * Charge le stock disponible pour un hébergement sur une plage de dates
  * 
- * Cette fonction récupère le stock depuis l'API OpenPro et normalise les différentes
- * structures de réponse possibles vers une map simple date -> quantité.
+ * Cette fonction charge le stock depuis la DB (source de vérité).
  * 
- * @param idFournisseur - Identifiant du fournisseur
- * @param idHebergement - Identifiant de l'hébergement
+ * @param idFournisseur - Identifiant du fournisseur (non utilisé, conservé pour compatibilité)
+ * @param idHebergement - Identifiant de l'hébergement (peut être number pour compatibilité ou string pour nouvelle structure)
  * @param debut - Date de début au format YYYY-MM-DD
  * @param fin - Date de fin au format YYYY-MM-DD
  * @param env - Variables d'environnement Workers
@@ -26,28 +29,29 @@ import type { Env } from '../../index.js';
  */
 export async function loadStockForAccommodation(
   idFournisseur: number,
-  idHebergement: number,
+  idHebergement: number | string,
   debut: string,
   fin: string,
   env: Env,
   signal?: AbortSignal
 ): Promise<Record<string, number>> {
-  const openProClient = getOpenProClient(env);
-  // Ne pas passer de paramètres de date à getStock selon la documentation API
-  const stock = await openProClient.getStock(idFournisseur, idHebergement);
   if (signal?.aborted) throw new Error('Cancelled');
   
-  const mapStock: Record<string, number> = {};
-  // Format OpenPro : { listeStock: [{ date, valeur }] }
-  // Compatibilité avec ancien format : { jours: [{ date, dispo }] } ou { stock: [{ jour, stock }] }
-  const stockArray = (stock as any).listeStock ?? (stock as any).stock ?? (stock as any).jours ?? [];
-  for (const j of stockArray) {
-    const date = j.date ?? j.jour;
-    const valeur = j.valeur ?? j.dispo ?? j.stock ?? 0;
-    if (date) {
-      mapStock[String(date)] = Number(valeur ?? 0);
+  // Si idHebergement est un number, chercher l'hébergement correspondant dans la DB
+  let accommodationId: string;
+  if (typeof idHebergement === 'number') {
+    const accommodation = await findAccommodationByPlatformId(PlateformeReservation.OpenPro, String(idHebergement), env);
+    if (!accommodation) {
+      // Si l'hébergement n'existe pas dans la DB, retourner un stock vide
+      console.warn(`[StockService] Accommodation with OpenPro ID ${idHebergement} not found in DB`);
+      return {};
     }
+    accommodationId = accommodation.id;
+  } else {
+    accommodationId = idHebergement;
   }
-  return mapStock;
+  
+  // Charger le stock depuis la DB
+  return await loadAccommodationStock(accommodationId, debut, fin, env);
 }
 

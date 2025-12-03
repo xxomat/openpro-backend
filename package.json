@@ -13,7 +13,11 @@
     "d1:create": "wrangler d1 create openpro-db",
     "d1:migrate": "wrangler d1 execute openpro-db --file=./schema.sql",
     "d1:migrate:local": "wrangler d1 execute openpro-db --local --file=./schema.sql",
-    "d1:migrate:add-synced-at": "wrangler d1 execute openpro-db --local --file=./migrations/001_add_synced_at_obsolete.sql"
+    "d1:migrate:add-synced-at": "wrangler d1 execute openpro-db --local --file=./migrations/001_add_synced_at_obsolete.sql",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ical": "vitest run src/services/ical/__tests__",
+    "test:ical:integration": "node scripts/test-ical-integration.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.45",
@@ -26,8 +30,11 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.11.0",
+    "better-sqlite3": "^12.5.0",
     "typescript": "^5.3.3",
+    "vitest": "^4.0.9",
     "wrangler": "^4.50.0"
   }
 }
