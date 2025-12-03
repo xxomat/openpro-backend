@@ -7,7 +7,7 @@
 import type { IRequest, Router } from 'itty-router';
 import type { Env, RequestContext } from '../index.js';
 import { jsonResponse, errorResponse } from '../utils/cors.js';
-import { getAccommodations } from '../services/openpro/accommodationService.js';
+import { loadAllAccommodations, loadAccommodation, findAccommodationByOpenProId } from '../services/openpro/accommodationService.js';
 import { getSupplierData } from '../services/openpro/supplierDataService.js';
 import { loadRatesForAccommodation } from '../services/openpro/rateService.js';
 import { loadStockForAccommodation } from '../services/openpro/stockService.js';
@@ -15,10 +15,13 @@ import { loadRateTypes, buildRateTypesList } from '../services/openpro/rateTypeS
 import { transformBulkToOpenProFormat, type BulkUpdateRequest } from '../services/openpro/bulkUpdateService.js';
 import { getOpenProClient } from '../services/openProClient.js';
 import { createLogger } from '../index.js';
-import { createLocalBooking, deleteLocalBooking } from '../services/openpro/localBookingService.js';
+import { createLocalBooking, deleteLocalBooking, loadAllBookings } from '../services/openpro/localBookingService.js';
 import { syncBookingToStub } from '../services/openpro/stubSyncService.js';
 import type { IApiTarif } from '../types/apiTypes.js';
 import type { TypeTarifModif } from '@openpro-api-react/client/types.js';
+import { SUPPLIER_ID } from '../config/supplier.js';
+import { saveRateType, deleteRateType, linkRateTypeToAccommodation, unlinkRateTypeFromAccommodation, loadAccommodationRateTypeLinks } from '../services/openpro/rateTypeDbService.js';
+import { saveAccommodationStock, saveAccommodationData, exportAccommodationDataToOpenPro } from '../services/openpro/accommodationDataService.js';
 
 /**
  * Enregistre les routes des fournisseurs
@@ -30,12 +33,13 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   router.get('/api/suppliers/:idFournisseur/accommodations', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     try {
-      const accommodations = await getAccommodations(idFournisseur, env);
+      const accommodations = await loadAllAccommodations(env);
       return jsonResponse(accommodations);
     } catch (error) {
       logger.error('Error fetching accommodations', error);
@@ -204,10 +208,40 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   // POST /api/suppliers/:idFournisseur/accommodations/:idHebergement/stock
   router.post('/api/suppliers/:idFournisseur/accommodations/:idHebergement/stock', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
-    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const idHebergementParam = request.params!.idHebergement;
     
-    if (isNaN(idFournisseur) || isNaN(idHebergement)) {
-      return errorResponse('Invalid parameters: idFournisseur and idHebergement must be numbers', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
+    }
+    
+    // idHebergement peut être un nombre (OpenPro ID) ou une string (DB ID)
+    // Essayer de trouver l'hébergement
+    let accommodationId: string;
+    let idOpenPro: number;
+    
+    if (!isNaN(parseInt(idHebergementParam, 10))) {
+      // C'est un ID OpenPro (nombre)
+      idOpenPro = parseInt(idHebergementParam, 10);
+      const accommodation = await findAccommodationByOpenProId(idOpenPro, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with OpenPro ID ${idOpenPro} not found`, 404);
+      }
+      accommodationId = accommodation.id;
+    } else {
+      // C'est un ID DB (string)
+      accommodationId = idHebergementParam;
+      const accommodation = await loadAccommodation(accommodationId, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with ID ${accommodationId} not found`, 404);
+      }
+      if (!accommodation.ids.OpenPro) {
+        return errorResponse(`Accommodation ${accommodationId} has no OpenPro ID`, 400);
+      }
+      idOpenPro = parseInt(accommodation.ids.OpenPro, 10);
+      if (isNaN(idOpenPro)) {
+        return errorResponse(`Invalid OpenPro ID for accommodation ${accommodationId}`, 400);
+      }
     }
     
     let stockPayload: { jours: Array<{ date: string; dispo: number }> };
@@ -236,10 +270,18 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
-      const openProClient = getOpenProClient(env);
-      await openProClient.updateStock(idFournisseur, idHebergement, stockPayload);
+      // Sauvegarder en DB
+      for (const jour of stockPayload.jours) {
+        await saveAccommodationStock(accommodationId, jour.date, jour.dispo, env);
+      }
       
-      logger.info(`Updated stock for supplier ${idFournisseur}, accommodation ${idHebergement}, ${stockPayload.jours.length} days`);
+      logger.info(`Saved stock to DB for accommodation ${accommodationId}, ${stockPayload.jours.length} days`);
+      
+      // Exporter vers OpenPro
+      const openProClient = getOpenProClient(env);
+      await openProClient.updateStock(SUPPLIER_ID, idOpenPro, stockPayload);
+      
+      logger.info(`Exported stock to OpenPro for supplier ${SUPPLIER_ID}, accommodation ${idOpenPro}, ${stockPayload.jours.length} days`);
       return jsonResponse({ success: true, updated: stockPayload.jours.length });
     } catch (error) {
       logger.error('Error updating stock', error);
@@ -255,14 +297,31 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   router.get('/api/suppliers/:idFournisseur/rate-types', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     try {
-      // Pour la modale de gestion, on veut tous les types de tarif, pas seulement ceux liés
+      // Charger depuis la DB en priorité, puis compléter avec OpenPro si nécessaire
+      const { loadRateTypes } = await import('../services/openpro/rateTypeDbService.js');
+      const dbRateTypes = await loadRateTypes(env);
+      
+      // Si on a des rate types en DB, les retourner
+      if (dbRateTypes.length > 0) {
+        return jsonResponse({
+          typeTarifs: dbRateTypes.map(rt => ({
+            idTypeTarif: rt.rateTypeId,
+            libelle: rt.label,
+            description: rt.descriptionFr ? { fr: rt.descriptionFr } : undefined,
+            ordre: rt.order
+          }))
+        });
+      }
+      
+      // Sinon, charger depuis OpenPro (pour compatibilité)
       const openProClient = getOpenProClient(env);
-      const allRateTypesResponse = await openProClient.listRateTypes(idFournisseur);
+      const allRateTypesResponse = await openProClient.listRateTypes(SUPPLIER_ID);
       
       logger.info('Raw response from OpenPro API:', JSON.stringify(allRateTypesResponse, null, 2));
       
@@ -309,8 +368,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   router.post('/api/suppliers/:idFournisseur/rate-types', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     let payload: { typeTarifModif: TypeTarifModif };
@@ -325,8 +385,26 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
+      // Créer dans OpenPro d'abord (pour obtenir l'ID)
       const openProClient = getOpenProClient(env);
-      const result = await openProClient.createRateType(idFournisseur, payload.typeTarifModif);
+      const result = await openProClient.createRateType(SUPPLIER_ID, payload.typeTarifModif);
+      
+      // Extraire l'ID du plan tarifaire créé
+      const idTypeTarif = (result as any)?.idTypeTarif || (result as any)?.data?.idTypeTarif;
+      if (!idTypeTarif) {
+        logger.warn('Could not extract idTypeTarif from OpenPro response, skipping DB save');
+        return jsonResponse(result);
+      }
+      
+      // Sauvegarder en DB
+      await saveRateType({
+        idTypeTarif: Number(idTypeTarif),
+        libelle: payload.typeTarifModif.libelle ? JSON.stringify(payload.typeTarifModif.libelle) : undefined,
+        description: payload.typeTarifModif.description ? JSON.stringify(payload.typeTarifModif.description) : undefined,
+        ordre: payload.typeTarifModif.ordre
+      }, env);
+      
+      logger.info(`Saved rate type ${idTypeTarif} to DB`);
       return jsonResponse(result);
     } catch (error) {
       logger.error('Error creating rate type', error);
@@ -343,8 +421,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     if (isNaN(idTypeTarif)) {
@@ -363,8 +442,19 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
+      // Mettre à jour dans OpenPro
       const openProClient = getOpenProClient(env);
-      await openProClient.updateRateType(idFournisseur, idTypeTarif, payload.typeTarifModif);
+      await openProClient.updateRateType(SUPPLIER_ID, idTypeTarif, payload.typeTarifModif);
+      
+      // Mettre à jour en DB
+      await saveRateType({
+        idTypeTarif,
+        libelle: payload.typeTarifModif.libelle ? JSON.stringify(payload.typeTarifModif.libelle) : undefined,
+        description: payload.typeTarifModif.description ? JSON.stringify(payload.typeTarifModif.description) : undefined,
+        ordre: payload.typeTarifModif.ordre
+      }, env);
+      
+      logger.info(`Updated rate type ${idTypeTarif} in DB and OpenPro`);
       return jsonResponse({ success: true });
     } catch (error) {
       logger.error('Error updating rate type', error);
@@ -381,8 +471,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     if (isNaN(idTypeTarif)) {
@@ -390,8 +481,14 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
+      // Supprimer dans OpenPro
       const openProClient = getOpenProClient(env);
-      await openProClient.deleteRateType(idFournisseur, idTypeTarif);
+      await openProClient.deleteRateType(SUPPLIER_ID, idTypeTarif);
+      
+      // Supprimer en DB
+      await deleteRateType(idTypeTarif, env);
+      
+      logger.info(`Deleted rate type ${idTypeTarif} from DB and OpenPro`);
       return jsonResponse({ success: true });
     } catch (error) {
       logger.error('Error deleting rate type', error);
@@ -433,24 +530,64 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   // POST /api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif
   router.post('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
-    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const idHebergementParam = request.params!.idHebergement;
     const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
-    }
-    
-    if (isNaN(idHebergement)) {
-      return errorResponse('Invalid idHebergement', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     if (isNaN(idTypeTarif)) {
       return errorResponse('Invalid idTypeTarif', 400);
     }
     
+    // Trouver l'hébergement
+    let accommodationId: string;
+    let idOpenPro: number;
+    
+    if (!isNaN(parseInt(idHebergementParam, 10))) {
+      // C'est un ID OpenPro (nombre)
+      idOpenPro = parseInt(idHebergementParam, 10);
+      const accommodation = await findAccommodationByOpenProId(idOpenPro, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with OpenPro ID ${idOpenPro} not found`, 404);
+      }
+      accommodationId = accommodation.id;
+    } else {
+      // C'est un ID DB (string)
+      accommodationId = idHebergementParam;
+      const accommodation = await loadAccommodation(accommodationId, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with ID ${accommodationId} not found`, 404);
+      }
+      if (!accommodation.ids.OpenPro) {
+        return errorResponse(`Accommodation ${accommodationId} has no OpenPro ID`, 400);
+      }
+      idOpenPro = parseInt(accommodation.ids.OpenPro, 10);
+      if (isNaN(idOpenPro)) {
+        return errorResponse(`Invalid OpenPro ID for accommodation ${accommodationId}`, 400);
+      }
+    }
+    
     try {
+      // Lier dans OpenPro
       const openProClient = getOpenProClient(env);
-      await openProClient.linkRateTypeToAccommodation(idFournisseur, idHebergement, idTypeTarif);
+      await openProClient.linkRateTypeToAccommodation(SUPPLIER_ID, idOpenPro, idTypeTarif);
+      
+      // Sauvegarder en DB
+      await linkRateTypeToAccommodation(accommodationId, idTypeTarif, env);
+      
+      logger.info(`Linked rate type ${idTypeTarif} to accommodation ${accommodationId} in DB and OpenPro`);
+      
+      // Exporter les données vers OpenPro
+      try {
+        await exportAccommodationDataToOpenPro(SUPPLIER_ID, idOpenPro, accommodationId, env);
+        logger.info(`Exported accommodation data to OpenPro after linking rate type`);
+      } catch (exportError) {
+        logger.warn('Failed to export accommodation data to OpenPro (non-blocking):', exportError);
+      }
+      
       return jsonResponse({ success: true });
     } catch (error) {
       logger.error('Error linking rate type to accommodation', error);
@@ -465,24 +602,64 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   // DELETE /api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif
   router.delete('/api/suppliers/:idFournisseur/accommodations/:idHebergement/rate-type-links/:idTypeTarif', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
-    const idHebergement = parseInt(request.params!.idHebergement, 10);
+    const idHebergementParam = request.params!.idHebergement;
     const idTypeTarif = parseInt(request.params!.idTypeTarif, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
-    }
-    
-    if (isNaN(idHebergement)) {
-      return errorResponse('Invalid idHebergement', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     if (isNaN(idTypeTarif)) {
       return errorResponse('Invalid idTypeTarif', 400);
     }
     
+    // Trouver l'hébergement
+    let accommodationId: string;
+    let idOpenPro: number;
+    
+    if (!isNaN(parseInt(idHebergementParam, 10))) {
+      // C'est un ID OpenPro (nombre)
+      idOpenPro = parseInt(idHebergementParam, 10);
+      const accommodation = await findAccommodationByOpenProId(idOpenPro, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with OpenPro ID ${idOpenPro} not found`, 404);
+      }
+      accommodationId = accommodation.id;
+    } else {
+      // C'est un ID DB (string)
+      accommodationId = idHebergementParam;
+      const accommodation = await loadAccommodation(accommodationId, env);
+      if (!accommodation) {
+        return errorResponse(`Accommodation with ID ${accommodationId} not found`, 404);
+      }
+      if (!accommodation.ids.OpenPro) {
+        return errorResponse(`Accommodation ${accommodationId} has no OpenPro ID`, 400);
+      }
+      idOpenPro = parseInt(accommodation.ids.OpenPro, 10);
+      if (isNaN(idOpenPro)) {
+        return errorResponse(`Invalid OpenPro ID for accommodation ${accommodationId}`, 400);
+      }
+    }
+    
     try {
+      // Délier dans OpenPro
       const openProClient = getOpenProClient(env);
-      await openProClient.unlinkRateTypeFromAccommodation(idFournisseur, idHebergement, idTypeTarif);
+      await openProClient.unlinkRateTypeFromAccommodation(SUPPLIER_ID, idOpenPro, idTypeTarif);
+      
+      // Supprimer de la DB
+      await unlinkRateTypeFromAccommodation(accommodationId, idTypeTarif, env);
+      
+      logger.info(`Unlinked rate type ${idTypeTarif} from accommodation ${accommodationId} in DB and OpenPro`);
+      
+      // Exporter les données vers OpenPro
+      try {
+        await exportAccommodationDataToOpenPro(SUPPLIER_ID, idOpenPro, accommodationId, env);
+        logger.info(`Exported accommodation data to OpenPro after unlinking rate type`);
+      } catch (exportError) {
+        logger.warn('Failed to export accommodation data to OpenPro (non-blocking):', exportError);
+      }
+      
       return jsonResponse({ success: true });
     } catch (error) {
       logger.error('Error unlinking rate type from accommodation', error);
@@ -501,8 +678,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     const debut = url.searchParams.get('debut');
     const fin = url.searchParams.get('fin');
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     if (!debut || !fin) {
@@ -510,11 +688,11 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
     
     try {
-      const accommodations = await getAccommodations(idFournisseur, env);
+      const accommodations = await loadAllAccommodations(env);
       const startDate = new Date(debut + 'T00:00:00');
       const endDate = new Date(fin + 'T23:59:59');
       
-      const data = await getSupplierData(idFournisseur, accommodations, startDate, endDate, env);
+      const data = await getSupplierData(SUPPLIER_ID, accommodations, startDate, endDate, env);
       return jsonResponse(data);
     } catch (error) {
       logger.error('Error fetching supplier data', error);
@@ -526,8 +704,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   router.post('/api/suppliers/:idFournisseur/bulk-update', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     let bulkData: BulkUpdateRequest;
@@ -553,6 +732,33 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
           datesCount: accommodation.dates.length
         });
         
+        // Trouver l'hébergement en DB par son ID OpenPro
+        const accommodationDb = await findAccommodationByOpenProId(accommodation.accommodationId, env);
+        if (!accommodationDb) {
+          logger.warn(`Accommodation with OpenPro ID ${accommodation.accommodationId} not found in DB, skipping`);
+          continue;
+        }
+        
+        const accommodationId = accommodationDb.id;
+        
+        // Sauvegarder chaque date modifiée en DB
+        for (const dateData of accommodation.dates) {
+          if (dateData.rateTypeId && dateData.price !== undefined) {
+            // Normaliser les valeurs
+            const dureeMin = dateData.minDuration ?? dateData.dureeMin;
+            const arriveeAutorisee = dateData.arrivalAllowed ?? dateData.arriveeAutorisee;
+            
+            await saveAccommodationData(accommodationId, dateData.rateTypeId, dateData.date, {
+              prixNuitee: dateData.price,
+              arriveeAutorisee: arriveeAutorisee,
+              dureeMinimale: dureeMin ?? undefined
+            }, env);
+          }
+        }
+        
+        logger.info(`Saved ${accommodation.dates.length} dates to DB for accommodation ${accommodationId}`);
+        
+        // Transformer et exporter vers OpenPro
         const requeteTarif = transformBulkToOpenProFormat(accommodation);
         
         if (requeteTarif !== null && requeteTarif.tarifs.length > 0) {
@@ -562,7 +768,7 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
           });
           
           await openProClient.setRates(
-            idFournisseur,
+            SUPPLIER_ID,
             accommodation.accommodationId,
             requeteTarif
           );
@@ -570,6 +776,14 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
           logger.info('Successfully called OpenPro API setRates', {
             accommodationId: accommodation.accommodationId
           });
+          
+          // Exporter aussi via exportAccommodationDataToOpenPro pour être sûr
+          try {
+            await exportAccommodationDataToOpenPro(SUPPLIER_ID, accommodation.accommodationId, accommodationId, env);
+            logger.info(`Exported accommodation data to OpenPro for ${accommodationId}`);
+          } catch (exportError) {
+            logger.warn('Failed to export accommodation data to OpenPro (non-blocking):', exportError);
+          }
         } else {
           logger.warn('Skipping accommodation: no valid tarifs to update', {
             accommodationId: accommodation.accommodationId
@@ -588,12 +802,36 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     }
   });
 
+  // GET /api/suppliers/:idFournisseur/local-bookings
+  router.get('/api/suppliers/:idFournisseur/local-bookings', async (request: IRequest) => {
+    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+    
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
+    }
+    
+    try {
+      // Charger toutes les réservations depuis la DB (toutes plateformes)
+      const bookings = await loadAllBookings(env);
+      return jsonResponse(bookings);
+    } catch (error) {
+      logger.error('Error fetching bookings', error);
+      return errorResponse(
+        'Failed to fetch bookings',
+        500,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    }
+  });
+
   // POST /api/suppliers/:idFournisseur/local-bookings
   router.post('/api/suppliers/:idFournisseur/local-bookings', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     let bookingData: {
@@ -705,16 +943,16 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       
       // Mettre à jour le stock dans OpenPro (si cela échoue, la création de réservation échouera aussi)
       await openProClient.updateStock(
-        idFournisseur,
+        SUPPLIER_ID,
         accommodationId,
         stockPayload
       );
       
-      logger.info(`Updated stock to 0 for supplier ${idFournisseur}, accommodation ${accommodationId}, dates ${dates[0]} to ${dates[dates.length - 1]}`);
+      logger.info(`Updated stock to 0 for supplier ${SUPPLIER_ID}, accommodation ${accommodationId}, dates ${dates[0]} to ${dates[dates.length - 1]}`);
       
       // Créer la réservation en DB seulement si la mise à jour du stock a réussi
       const createdBooking = await createLocalBooking({
-        supplierId: idFournisseur,
+        supplierId: SUPPLIER_ID,
         accommodationId: accommodationId,
         arrivalDate: arrivalDate,
         departureDate: departureDate,
@@ -727,11 +965,11 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
         reference: reference
       }, env);
       
-      logger.info(`Created local booking for supplier ${idFournisseur}, accommodation ${accommodationId}`);
+      logger.info(`Created local booking for supplier ${SUPPLIER_ID}, accommodation ${accommodationId}`);
       
       // Synchroniser avec le stub-server en mode test (non bloquant)
       try {
-        await syncBookingToStub(createdBooking, idFournisseur, env);
+        await syncBookingToStub(createdBooking, SUPPLIER_ID, env);
       } catch (syncError) {
         // Ne pas faire échouer la création si la sync échoue
         logger.warn('Failed to sync booking to stub-server (non-blocking):', syncError);
@@ -759,8 +997,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
   router.get('/api/suppliers/:idFournisseur/local-bookings-sync-status', async (request: IRequest) => {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     try {
@@ -768,14 +1007,14 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       const pendingResult = await env.DB.prepare(`
         SELECT COUNT(*) as count FROM local_bookings
         WHERE id_fournisseur = ? AND synced_at IS NULL
-      `).bind(idFournisseur).first();
+      `).bind(SUPPLIER_ID).first();
       const pendingSyncCount = (pendingResult as any)?.count || 0;
       
       // Compter les réservations locales synchronisées
       const syncedResult = await env.DB.prepare(`
         SELECT COUNT(*) as count FROM local_bookings
         WHERE id_fournisseur = ? AND synced_at IS NOT NULL
-      `).bind(idFournisseur).first();
+      `).bind(SUPPLIER_ID).first();
       const syncedCount = (syncedResult as any)?.count || 0;
       
       // Les réservations obsolètes ne sont pas stockées dans la DB
@@ -788,14 +1027,14 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
       const lastChangeResult = await env.DB.prepare(`
         SELECT MAX(COALESCE(synced_at, date_modification)) as last_change FROM local_bookings
         WHERE id_fournisseur = ?
-      `).bind(idFournisseur).first();
+      `).bind(SUPPLIER_ID).first();
       const lastChange = (lastChangeResult as any)?.last_change || null;
       
       // Récupérer la date de dernière synchronisation (max synced_at)
       const lastSyncCheckResult = await env.DB.prepare(`
         SELECT MAX(synced_at) as last_sync_check FROM local_bookings
         WHERE id_fournisseur = ? AND synced_at IS NOT NULL
-      `).bind(idFournisseur).first();
+      `).bind(SUPPLIER_ID).first();
       const lastSyncCheck = (lastSyncCheckResult as any)?.last_sync_check || null;
       
       return jsonResponse({
@@ -820,8 +1059,9 @@ export function suppliersRouter(router: Router, env: Env, ctx: RequestContext) {
     const idFournisseur = parseInt(request.params!.idFournisseur, 10);
     const idDossier = parseInt(request.params!.idDossier, 10);
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur: must be a number', 400);
+    // Vérifier que idFournisseur correspond à SUPPLIER_ID
+    if (idFournisseur !== SUPPLIER_ID) {
+      return errorResponse(`Invalid idFournisseur: must be ${SUPPLIER_ID}`, 400);
     }
     
     if (isNaN(idDossier)) {
