@@ -48,14 +48,14 @@ export async function getSupplierData(
   env: Env,
   signal?: AbortSignal
 ): Promise<ISupplierData> {
-  const nextStock: Record<number, Record<string, number>> = {};
-  const nextRates: Record<number, Record<string, Record<number, number>>> = {};
-  const nextPromo: Record<number, Record<string, boolean>> = {};
-  const nextRateTypes: Record<number, Record<string, string[]>> = {};
-  const nextDureeMin: Record<number, Record<string, Record<number, number | null>>> = {};
-  const nextArriveeAutorisee: Record<number, Record<string, Record<number, boolean>>> = {};
-  const nextBookings: Record<number, import('../../types/api.js').IBookingDisplay[]> = {};
-  const nextRateTypeLinks: Record<number, number[]> = {};
+  const nextStock: Record<string, Record<string, number>> = {}; // Clé: accommodationId (GUID DB)
+  const nextRates: Record<string, Record<string, Record<number, number>>> = {}; // Clé: accommodationId (GUID DB)
+  const nextPromo: Record<string, Record<string, boolean>> = {}; // Clé: accommodationId (GUID DB)
+  const nextRateTypes: Record<string, Record<string, string[]>> = {}; // Clé: accommodationId (GUID DB)
+  const nextDureeMin: Record<string, Record<string, Record<number, number | null>>> = {}; // Clé: accommodationId (GUID DB)
+  const nextArriveeAutorisee: Record<string, Record<string, Record<number, boolean>>> = {}; // Clé: accommodationId (GUID DB)
+  const nextBookings: Record<string, import('../../types/api.js').IBookingDisplay[]> = {}; // Clé: accommodationId (GUID DB)
+  const nextRateTypeLinks: Record<string, number[]> = {}; // Clé: accommodationId (GUID DB)
   const debut = formatDate(startDate);
   const fin = formatDate(endDate);
   
@@ -87,49 +87,38 @@ export async function getSupplierData(
   for (const acc of accommodationsList) {
     if (signal?.aborted) throw new Error('Cancelled');
     
-    // Extraire l'ID OpenPro depuis ids
-    const idOpenPro = acc.ids[PlateformeReservation.OpenPro];
-    if (!idOpenPro) {
-      // Hébergement sans ID OpenPro, initialiser avec des valeurs vides
-      const accommodationIdNum = parseInt(acc.id, 10) || 0;
-      nextRateTypeLinks[accommodationIdNum] = [];
-      nextStock[accommodationIdNum] = {};
-      nextRates[accommodationIdNum] = {};
-      nextPromo[accommodationIdNum] = {};
-      nextRateTypes[accommodationIdNum] = {};
-      nextDureeMin[accommodationIdNum] = {};
-      nextArriveeAutorisee[accommodationIdNum] = {};
-      nextBookings[accommodationIdNum] = [];
-      continue;
-    }
-    
-    const accommodationIdNum = parseInt(idOpenPro, 10);
-    if (isNaN(accommodationIdNum)) {
-      console.warn(`Invalid OpenPro ID for accommodation ${acc.id}: ${idOpenPro}`);
-      continue;
-    }
+    // Utiliser l'ID DB (GUID) comme clé pour toutes les structures
+    const accommodationId = acc.id; // GUID DB
     
     // Charger les liaisons entre hébergement et types de tarif depuis la DB
     try {
       if (signal?.aborted) throw new Error('Cancelled');
       
       // Charger les liens depuis la DB (utiliser l'ID interne)
-      const rateTypeIds = await loadAccommodationRateTypeLinks(acc.id, env);
-      nextRateTypeLinks[accommodationIdNum] = rateTypeIds;
+      const rateTypeIds = await loadAccommodationRateTypeLinks(accommodationId, env);
+      nextRateTypeLinks[accommodationId] = rateTypeIds;
     } catch {
       // Ignorer les erreurs de liaisons, initialiser avec un array vide
-      nextRateTypeLinks[accommodationIdNum] = [];
+      nextRateTypeLinks[accommodationId] = [];
     }
     
+    // Extraire l'ID OpenPro pour les services qui en ont encore besoin (temporaire)
+    const idOpenPro = acc.ids[PlateformeReservation.OpenPro];
+    const accommodationIdNum = idOpenPro ? parseInt(idOpenPro, 10) : undefined;
+    
     // Charger le stock
-    const mapStock = await loadStockForAccommodation(idFournisseur, accommodationIdNum, debut, fin, env, signal);
-    nextStock[accommodationIdNum] = mapStock;
+    if (accommodationIdNum && !isNaN(accommodationIdNum)) {
+      const mapStock = await loadStockForAccommodation(idFournisseur, accommodationIdNum, debut, fin, env, signal);
+      nextStock[accommodationId] = mapStock;
+    } else {
+      nextStock[accommodationId] = {};
+    }
 
     // Charger les tarifs, promotions, types et durées minimales
     try {
       const ratesData = await loadRatesForAccommodation(
         idFournisseur,
-        accommodationIdNum,
+        accommodationId, // Passer le GUID DB
         debut,
         fin,
         discoveredRateTypes,
@@ -137,20 +126,20 @@ export async function getSupplierData(
         signal
       );
       
-      nextRates[accommodationIdNum] = ratesData.rates;
-      nextPromo[accommodationIdNum] = ratesData.promo;
-      nextRateTypes[accommodationIdNum] = ratesData.rateTypes;
-      nextDureeMin[accommodationIdNum] = ratesData.dureeMin;
-      nextArriveeAutorisee[accommodationIdNum] = ratesData.arriveeAutorisee;
+      nextRates[accommodationId] = ratesData.rates;
+      nextPromo[accommodationId] = ratesData.promo;
+      nextRateTypes[accommodationId] = ratesData.rateTypes;
+      nextDureeMin[accommodationId] = ratesData.dureeMin;
+      nextArriveeAutorisee[accommodationId] = ratesData.arriveeAutorisee;
     } catch (error) {
       // Logger l'erreur pour le débogage mais continuer
-      console.error(`Error loading rates for accommodation ${accommodationIdNum}:`, error);
+      console.error(`Error loading rates for accommodation ${accommodationId}:`, error);
       // Initialiser avec des objets vides pour éviter undefined
-      nextRates[accommodationIdNum] = {};
-      nextPromo[accommodationIdNum] = {};
-      nextRateTypes[accommodationIdNum] = {};
-      nextDureeMin[accommodationIdNum] = {};
-      nextArriveeAutorisee[accommodationIdNum] = {};
+      nextRates[accommodationId] = {};
+      nextPromo[accommodationId] = {};
+      nextRateTypes[accommodationId] = {};
+      nextDureeMin[accommodationId] = {};
+      nextArriveeAutorisee[accommodationId] = {};
     }
 
     // Charger les réservations (toutes les réservations, pas de filtre par dates)
@@ -158,14 +147,14 @@ export async function getSupplierData(
       // Charger les réservations depuis la DB (DB-first)
       const bookings = await loadBookingsForAccommodation(
         idFournisseur,
-        accommodationIdNum,
+        accommodationId, // Passer le GUID DB
         env,
         signal
       );
-      nextBookings[accommodationIdNum] = bookings;
+      nextBookings[accommodationId] = bookings;
     } catch {
       // Ignorer les erreurs de réservations pour l'instant
-      nextBookings[accommodationIdNum] = [];
+      nextBookings[accommodationId] = [];
     }
   }
   

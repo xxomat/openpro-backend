@@ -24,7 +24,7 @@ export interface BulkUpdateDate {
  * Type pour un hébergement avec ses dates modifiées
  */
 export interface BulkUpdateAccommodation {
-  accommodationId: number;
+  accommodationId: string; // GUID interne de la DB (DB-first)
   dates: BulkUpdateDate[];
 }
 

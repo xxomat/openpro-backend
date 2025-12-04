@@ -233,7 +233,28 @@ export async function loadRatesForAccommodation(
   const rateTypeLabels = new Map<number, string>();
   for (const rt of rateTypes) {
     if (rt.rateTypeId && rt.label) {
-      const label = typeof rt.label === 'string' ? rt.label : (rt.label as any).fr || (rt.label as any).FR || String(rt.label);
+      let label: string | undefined;
+      if (typeof rt.label === 'string') {
+        label = rt.label;
+      } else if (Array.isArray(rt.label)) {
+        // Format tableau: [{ langue: 'fr', texte: '...' }]
+        const frenchLabel = rt.label.find((item: { langue?: string; texte?: string }) => 
+          item.langue === 'fr' || item.langue === 'FR'
+        );
+        label = frenchLabel?.texte;
+      } else if (typeof rt.label === 'object' && rt.label !== null) {
+        // Format objet: { fr: '...', en: '...' }
+        const labelObj = rt.label as Record<string, string>;
+        label = labelObj.fr || labelObj.FR || labelObj['fr'] || labelObj['FR'];
+      }
+      // Fallback sur descriptionFr si disponible
+      if (!label && rt.descriptionFr) {
+        label = rt.descriptionFr;
+      }
+      // Dernier fallback: utiliser l'ID
+      if (!label) {
+        label = `Type ${rt.rateTypeId}`;
+      }
       rateTypeLabels.set(rt.rateTypeId, label);
     }
   }
@@ -276,7 +297,7 @@ export async function loadRatesForAccommodation(
       
       // Type de tarif (libellé)
       const label = rateTypeLabels.get(idTypeTarif);
-      if (label) {
+      if (label && typeof label === 'string') {
         if (!mapRateTypes[date]) {
           mapRateTypes[date] = [];
         }

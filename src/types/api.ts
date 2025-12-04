@@ -92,17 +92,17 @@ export interface IBookingDisplay {
 }
 
 export interface ISupplierData {
-  stock: Record<number, Record<string, number>>;
-  rates: Record<number, Record<string, Record<number, number>>>;
-  promo: Record<number, Record<string, boolean>>;
-  rateTypes: Record<number, Record<string, string[]>>;
-  minDuration: Record<number, Record<string, Record<number, number | null>>>;
-  arrivalAllowed: Record<number, Record<string, Record<number, boolean>>>;
+  stock: Record<string, Record<string, number>>; // Clé: accommodationId (GUID DB)
+  rates: Record<string, Record<string, Record<number, number>>>; // Clé: accommodationId (GUID DB)
+  promo: Record<string, Record<string, boolean>>; // Clé: accommodationId (GUID DB)
+  rateTypes: Record<string, Record<string, string[]>>; // Clé: accommodationId (GUID DB)
+  minDuration: Record<string, Record<string, Record<number, number | null>>>; // Clé: accommodationId (GUID DB)
+  arrivalAllowed: Record<string, Record<string, Record<number, boolean>>>; // Clé: accommodationId (GUID DB)
   rateTypeLabels: Record<number, string>;
   rateTypesList: IRateType[];
-  bookings: Record<number, IBookingDisplay[]>;
-  /** Map des IDs de types de tarif liés par hébergement (clé: accommodationId, valeur: array de rateTypeId) */
-  rateTypeLinksByAccommodation: Record<number, number[]>;
+  bookings: Record<string, IBookingDisplay[]>; // Clé: accommodationId (GUID DB)
+  /** Map des IDs de types de tarif liés par hébergement (clé: accommodationId (GUID DB), valeur: array de rateTypeId) */
+  rateTypeLinksByAccommodation: Record<string, number[]>; // Clé: accommodationId (GUID DB)
 }
 
 export interface IRatesData {

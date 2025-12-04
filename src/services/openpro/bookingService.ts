@@ -28,7 +28,7 @@ import { loadLocalBookingsForAccommodation } from './localBookingService.js';
  */
 export async function loadBookingsForAccommodation(
   idFournisseur: number,
-  accommodationId: number,
+  accommodationId: string, // GUID DB uniquement
   env: Env,
   signal?: AbortSignal
 ): Promise<IBookingDisplay[]> {

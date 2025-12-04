@@ -17,6 +17,7 @@ import { loadStockForAccommodation } from '../services/openpro/stockService.js';
 import { findAccommodationByOpenProId } from '../services/openpro/accommodationService.js';
 import { createLogger } from '../index.js';
 import type { ISuggestionRequest } from '../types/suggestions.js';
+import { getSupplierId } from '../config/supplier.js';
 
 /**
  * Normalise les données de tarifs depuis la DB vers un format simplifié
@@ -49,18 +50,14 @@ function normalizeStockFromDb(stock: Record<string, number>): Record<string, num
 export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx: RequestContext) {
   const logger = createLogger(ctx);
   
-  // GET /ai/suggestions/:idFournisseur
-  router.get('/ai/suggestions/:idFournisseur', async (request: IRequest) => {
-    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+  // GET /ai/suggestions
+  router.get('/ai/suggestions', async (request: IRequest) => {
     const url = new URL(request.url);
     const status = url.searchParams.get('status') as 'pending' | 'applied' | 'rejected' | null;
     
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur: must be a number', 400);
-    }
-    
     try {
-      const suggestions = await getSuggestionsBySupplier(idFournisseur, status || undefined, env);
+      const SUPPLIER_ID = getSupplierId(env);
+      const suggestions = await getSuggestionsBySupplier(SUPPLIER_ID, status || undefined, env);
       return jsonResponse({ suggestions });
     } catch (error) {
       logger.error('Error fetching suggestions', error);
@@ -100,8 +97,8 @@ export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx
   });
   
   // POST /ai/suggestions/:idFournisseur/generate
-  router.post('/ai/suggestions/:idFournisseur/generate', async (request: IRequest) => {
-    const idFournisseur = parseInt(request.params!.idFournisseur, 10);
+  router.post('/ai/suggestions/generate', async (request: IRequest) => {
+    const SUPPLIER_ID = getSupplierId(env);
     
     let body: { idHebergement: number };
     try {
@@ -111,10 +108,6 @@ export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx
     }
     
     const { idHebergement } = body;
-    
-    if (isNaN(idFournisseur)) {
-      return errorResponse('Invalid idFournisseur: must be a number', 400);
-    }
     
     if (!idHebergement || isNaN(idHebergement)) {
       return errorResponse('Invalid idHebergement: must be a number', 400);
@@ -137,12 +130,12 @@ export function suggestionsRouter(router: typeof Router.prototype, env: Env, ctx
       // Charger les données contextuelles depuis la DB
       const [ratesData, stock] = await Promise.all([
         loadAccommodationData(accommodation.id, debut, fin, env),
-        loadStockForAccommodation(idFournisseur, idHebergement, debut, fin, env)
+        loadStockForAccommodation(SUPPLIER_ID, idHebergement, debut, fin, env)
       ]);
       
       // Préparer la requête d'analyse
       const analysisRequest: ISuggestionRequest = {
-        supplierId: idFournisseur,
+        supplierId: SUPPLIER_ID,
         accommodationId: idHebergement,
         recentBookings: [],
         currentRates: normalizeRatesFromDb(ratesData),

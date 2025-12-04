@@ -11,6 +11,7 @@
 import type { IBookingDisplay } from '../../types/api.js';
 import { PlateformeReservation, BookingStatus } from '../../types/api.js';
 import type { Env } from '../../index.js';
+import { loadAccommodation } from './accommodationService.js';
 
 /**
  * Interface pour une réservation locale en DB
@@ -39,20 +40,38 @@ interface LocalBookingRow {
  * Charge les réservations locales pour un hébergement donné
  * 
  * @param idFournisseur - Identifiant du fournisseur
- * @param idHebergement - Identifiant de l'hébergement
+ * @param accommodationId - GUID de l'hébergement (DB-first)
  * @param env - Variables d'environnement Workers
  * @returns Tableau des réservations locales pour cet hébergement
  */
 export async function loadLocalBookingsForAccommodation(
   idFournisseur: number,
-  accommodationId: number,
+  accommodationId: string, // GUID DB uniquement
   env: Env
 ): Promise<IBookingDisplay[]> {
+  // Charger l'hébergement pour obtenir son ID OpenPro (la table local_bookings utilise encore INTEGER)
+  const accommodation = await loadAccommodation(accommodationId, env);
+  if (!accommodation) {
+    return [];
+  }
+  
+  // Extraire l'ID OpenPro depuis ids
+  const idOpenPro = accommodation.ids[PlateformeReservation.OpenPro];
+  if (!idOpenPro) {
+    // Pas d'ID OpenPro, retourner vide (la table local_bookings utilise encore INTEGER)
+    return [];
+  }
+  
+  const idOpenProNum = parseInt(idOpenPro, 10);
+  if (isNaN(idOpenProNum)) {
+    return [];
+  }
+  
   const result = await env.DB.prepare(`
     SELECT * FROM local_bookings
     WHERE id_fournisseur = ? AND id_hebergement = ?
     ORDER BY date_arrivee ASC
-  `).bind(idFournisseur, accommodationId).all();
+  `).bind(idFournisseur, idOpenProNum).all();
 
   if (!result.results || result.results.length === 0) {
     return [];
