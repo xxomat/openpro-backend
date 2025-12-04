@@ -675,8 +675,8 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
   // POST /api/supplier/local-bookings
   router.post('/api/supplier/local-bookings', async (request: IRequest) => {
     let bookingData: {
-      accommodationId?: number;
-      idHebergement?: number; // Support ancien format pour compatibilité
+      accommodationId?: string;
+      idHebergement?: string; // Support ancien format pour compatibilité
       arrivalDate?: string;
       dateArrivee?: string; // Support ancien format pour compatibilité
       departureDate?: string;
@@ -718,9 +718,25 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
       return errorResponse('Missing required fields: accommodationId (or idHebergement), arrivalDate (or dateArrivee), departureDate (or dateDepart)', 400);
     }
     
-    // Valider les types
-    if (typeof accommodationId !== 'number') {
-      return errorResponse('accommodationId (or idHebergement) must be a number', 400);
+    // Valider les types (accommodationId doit être un GUID string)
+    if (typeof accommodationId !== 'string') {
+      return errorResponse('accommodationId (or idHebergement) must be a string (GUID)', 400);
+    }
+    
+    // Charger l'hébergement pour obtenir son ID OpenPro (nécessaire pour updateStock)
+    const { loadAccommodation } = await import('../services/openpro/accommodationService.js');
+    const accommodation = await loadAccommodation(accommodationId, env);
+    if (!accommodation) {
+      return errorResponse(`Accommodation ${accommodationId} not found`, 404);
+    }
+    
+    // Vérifier que l'hébergement a un ID OpenPro (nécessaire pour l'export)
+    if (!accommodation.ids.OpenPro) {
+      return errorResponse(`Accommodation ${accommodationId} has no OpenPro ID`, 400);
+    }
+    const idOpenPro = parseInt(accommodation.ids.OpenPro, 10);
+    if (isNaN(idOpenPro)) {
+      return errorResponse(`Invalid OpenPro ID for accommodation ${accommodationId}`, 400);
     }
     
     // Valider le format des dates (YYYY-MM-DD)
@@ -782,9 +798,10 @@ export function suppliersRouter(router: typeof Router.prototype, env: Env, ctx: 
       };
       
       // Mettre à jour le stock dans OpenPro (si cela échoue, la création de réservation échouera aussi)
+      // Utiliser idOpenPro car updateStock attend un ID OpenPro (number)
       await openProClient.updateStock(
         SUPPLIER_ID,
-        accommodationId,
+        idOpenPro,
         stockPayload
       );
       

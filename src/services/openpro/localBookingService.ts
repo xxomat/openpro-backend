@@ -11,7 +11,6 @@
 import type { IBookingDisplay } from '../../types/api.js';
 import { PlateformeReservation, BookingStatus } from '../../types/api.js';
 import type { Env } from '../../index.js';
-import { loadAccommodation } from './accommodationService.js';
 
 /**
  * Interface pour une réservation locale en DB
@@ -19,7 +18,7 @@ import { loadAccommodation } from './accommodationService.js';
 interface LocalBookingRow {
   id: string;
   id_fournisseur: number;
-  id_hebergement: number; // Sera migré vers TEXT plus tard
+  id_hebergement: string; // GUID DB (TEXT)
   date_arrivee: string;
   date_depart: string;
   client_nom?: string;
@@ -49,29 +48,12 @@ export async function loadLocalBookingsForAccommodation(
   accommodationId: string, // GUID DB uniquement
   env: Env
 ): Promise<IBookingDisplay[]> {
-  // Charger l'hébergement pour obtenir son ID OpenPro (la table local_bookings utilise encore INTEGER)
-  const accommodation = await loadAccommodation(accommodationId, env);
-  if (!accommodation) {
-    return [];
-  }
-  
-  // Extraire l'ID OpenPro depuis ids
-  const idOpenPro = accommodation.ids[PlateformeReservation.OpenPro];
-  if (!idOpenPro) {
-    // Pas d'ID OpenPro, retourner vide (la table local_bookings utilise encore INTEGER)
-    return [];
-  }
-  
-  const idOpenProNum = parseInt(idOpenPro, 10);
-  if (isNaN(idOpenProNum)) {
-    return [];
-  }
-  
+  // Utiliser directement le GUID DB
   const result = await env.DB.prepare(`
     SELECT * FROM local_bookings
     WHERE id_fournisseur = ? AND id_hebergement = ?
     ORDER BY date_arrivee ASC
-  `).bind(idFournisseur, idOpenProNum).all();
+  `).bind(idFournisseur, accommodationId).all();
 
   if (!result.results || result.results.length === 0) {
     return [];
@@ -167,7 +149,7 @@ export async function updateSyncedStatusForLocalBookings(
  */
 export interface CreateLocalBookingData {
   supplierId: number;
-  accommodationId: number;
+  accommodationId: string; // GUID DB
   arrivalDate: string; // Format: YYYY-MM-DD
   departureDate: string;  // Format: YYYY-MM-DD
   clientName?: string;
@@ -310,7 +292,7 @@ function convertRowToBookingDisplay(row: LocalBookingRow): IBookingDisplay {
 
   return {
     bookingId, // ID interne de la DB converti en nombre pour identifier les réservations locales
-    accommodationId: row.id_hebergement, // number pour compatibilité, sera string plus tard
+    accommodationId: row.id_hebergement, // GUID DB (string)
     arrivalDate: row.date_arrivee,
     departureDate: row.date_depart,
     reference: row.reference,
@@ -400,7 +382,7 @@ async function findLocalBookingByIdDossier(
  */
 async function findLocalBookingByCriteria(
   idFournisseur: number,
-  accommodationId: number,
+  accommodationId: string, // GUID DB
   arrivalDate: string,
   departureDate: string,
   env: Env
@@ -433,7 +415,7 @@ export async function deleteLocalBooking(
   idFournisseur: number,
   bookingId: number,
   env: Env,
-  accommodationId?: number,
+  accommodationId?: string, // GUID DB
   arrivalDate?: string,
   departureDate?: string
 ): Promise<{ success: boolean; deletedBooking: LocalBookingRow | null }> {
@@ -476,7 +458,7 @@ export async function updateBookingStatus(
   bookingId: number,
   bookingStatus: BookingStatus,
   env: Env,
-  accommodationId?: number,
+  accommodationId?: string, // GUID DB
   arrivalDate?: string,
   departureDate?: string
 ): Promise<boolean> {
@@ -521,7 +503,7 @@ export async function markBookingAsCancelled(
   idFournisseur: number,
   bookingId: number,
   env: Env,
-  accommodationId?: number,
+  accommodationId?: string, // GUID DB
   arrivalDate?: string,
   departureDate?: string
 ): Promise<boolean> {

@@ -111,11 +111,11 @@ CREATE INDEX IF NOT EXISTS idx_ical_sync_config_hebergement
   ON ical_sync_config(id_hebergement);
 
 -- Table des réservations locales (créées via l'interface admin)
--- Note: id_hebergement reste INTEGER pour compatibilité, sera migré vers TEXT plus tard
+-- Note: id_hebergement est maintenant TEXT (GUID DB) - voir migration 006
 CREATE TABLE IF NOT EXISTS local_bookings (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   id_fournisseur INTEGER NOT NULL,
-  id_hebergement INTEGER NOT NULL, -- Sera migré vers TEXT pour référencer accommodations.id
+  id_hebergement TEXT NOT NULL, -- GUID DB - référence accommodations.id
   date_arrivee TEXT NOT NULL, -- Format: YYYY-MM-DD
   date_depart TEXT NOT NULL,  -- Format: YYYY-MM-DD
   client_nom TEXT,
@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS local_bookings (
   CHECK (date_depart > date_arrivee),
   CHECK (nb_personnes > 0),
   CHECK (reservation_platform IN ('Directe', 'OpenPro', 'Booking.com', 'Xotelia', 'Unknown')),
-  CHECK (booking_status IN ('Quote', 'Confirmed', 'Paid', 'Cancelled', 'Past'))
+  CHECK (booking_status IN ('Quote', 'Confirmed', 'Paid', 'Cancelled', 'Past')),
+  FOREIGN KEY (id_hebergement) REFERENCES accommodations(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_local_bookings_hebergement 
